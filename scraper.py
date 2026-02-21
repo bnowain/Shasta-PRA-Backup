@@ -711,6 +711,8 @@ def main():
                        help="Resume detail scraping from this ID (e.g. 25-100)")
     parser.add_argument('--list-only', action='store_true',
                        help="Only fetch request listings (fastest)")
+    parser.add_argument('--full-rescrape', action='store_true',
+                       help="Re-scrape details for ALL requests, not just unscraped ones")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -730,6 +732,12 @@ def main():
     print(f"  Target:   {BASE_URL}")
     print(f"  Database: {DB_PATH.absolute()}")
     print("=" * 60)
+
+    if args.full_rescrape:
+        count = conn.execute("SELECT COUNT(*) FROM requests WHERE detail_scraped=1").fetchone()[0]
+        conn.execute("UPDATE requests SET detail_scraped=0")
+        conn.commit()
+        print(f"  Reset {count} records for full re-scrape")
 
     if args.docs_only:
         scraper.download_only()
