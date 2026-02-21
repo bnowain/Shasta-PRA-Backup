@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA Backup — Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <h1 class="page-title">Dashboard</h1>
+        <p class="subtitle">Shasta County Public Records Requests Archive</p>
+
+        <div class="cards" id="stats-cards">
+            <div class="card"><div class="label">Requests</div><div class="value" id="total-requests">—</div></div>
+            <div class="card"><div class="label">Documents</div><div class="value" id="total-documents">—</div></div>
+            <div class="card"><div class="label">Departments</div><div class="value" id="total-departments">—</div></div>
+        </div>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <div class="chart-title">Requests by Status</div>
+                <canvas id="status-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Requests by Month</div>
+                <canvas id="month-chart"></canvas>
+            </div>
+        </div>
+
+        <h2 style="font-size:1.1rem; margin-bottom:.75rem;">Recent Requests</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr>
+                    <th>ID</th><th>Status</th><th>Request</th><th>Department</th><th>Date</th><th>Docs</th>
+                </tr></thead>
+                <tbody id="recent-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/dashboard.js"></script>
+</body>
+</html>

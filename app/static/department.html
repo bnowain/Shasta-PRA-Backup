@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA — Department</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div style="margin-bottom:1rem"><a href="/departments" style="font-size:.85rem">&larr; Back to departments</a></div>
+        <h1 class="page-title" id="dept-name">Loading...</h1>
+        <div id="dept-info" class="subtitle"></div>
+        <div class="table-wrap">
+            <table>
+                <thead><tr>
+                    <th>ID</th><th>Status</th><th>Request</th><th>POC</th><th>Date</th><th>Docs</th>
+                </tr></thead>
+                <tbody id="dept-requests"></tbody>
+            </table>
+        </div>
+        <div class="pagination" id="pagination"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script>
+        let offset = 0;
+        const LIMIT = 50;
+
+        document.addEventListener('DOMContentLoaded', () => loadDept());
+
+        async function loadDept() {
+            const deptId = location.pathname.split('/').pop();
+            const tbody = document.getElementById('dept-requests');
+            try {
+                const data = await apiFetch(`/api/departments/${deptId}/requests?limit=${LIMIT}&offset=${offset}`);
+                document.getElementById('dept-name').textContent = data.department;
+                document.getElementById('dept-info').textContent = `${data.total} requests`;
+                document.title = `${data.department} — Shasta PRA`;
+
+                tbody.innerHTML = data.results.map(r => `
+                    <tr onclick="location.href='/requests/${encodeURIComponent(r.pretty_id)}'">
+                        <td><strong>${escapeHtml(r.pretty_id)}</strong></td>
+                        <td>${statusPill(r.request_state)}</td>
+                        <td>${escapeHtml(truncate(r.request_text, 100))}</td>
+                        <td>${escapeHtml(r.poc_name || '—')}</td>
+                        <td style="white-space:nowrap">${formatDate(r.request_date)}</td>
+                        <td class="text-right">${r.doc_count}</td>
+                    </tr>
+                `).join('') || '<tr><td colspan="6" style="text-align:center;padding:2rem;color:var(--text-dim)">No requests</td></tr>';
+
+                const totalPages = Math.ceil(data.total / LIMIT);
+                const curPage = Math.floor(offset / LIMIT) + 1;
+                const pg = document.getElementById('pagination');
+                if (totalPages > 1) {
+                    pg.innerHTML = `
+                        <button ${curPage <= 1 ? 'disabled' : ''} onclick="goPage(${curPage-1})">Prev</button>
+                        <span class="page-info">Page ${curPage} of ${totalPages}</span>
+                        <button ${curPage >= totalPages ? 'disabled' : ''} onclick="goPage(${curPage+1})">Next</button>`;
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="6" class="error">${escapeHtml(err.message)}</td></tr>`;
+            }
+        }
+
+        function goPage(p) { offset = (p - 1) * LIMIT; loadDept(); window.scrollTo(0, 0); }
+    </script>
+</body>
+</html>

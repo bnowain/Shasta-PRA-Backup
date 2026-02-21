@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA — Analytics</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <h1 class="page-title">Analytics</h1>
+        <p class="subtitle">Visual analysis of Shasta County public records data</p>
+
+        <div class="charts-grid">
+            <div class="chart-container">
+                <div class="chart-title">Department Workload</div>
+                <canvas id="dept-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Status Distribution</div>
+                <canvas id="status-pie"></canvas>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <div class="chart-title">Requests Over Time</div>
+            <canvas id="time-chart"></canvas>
+        </div>
+
+        <div class="charts-grid" style="margin-top:1rem">
+            <div class="chart-container">
+                <div class="chart-title">Top Points of Contact</div>
+                <div id="poc-table-wrap"></div>
+            </div>
+            <div class="chart-container">
+                <div class="chart-title">Most Documented Requests</div>
+                <div id="topdocs-table-wrap"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/analytics.js"></script>
+</body>
+</html>

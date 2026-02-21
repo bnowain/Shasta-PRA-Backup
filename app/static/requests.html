@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA — Requests</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <h1 class="page-title">Public Records Requests</h1>
+
+        <div class="filters" id="filter-bar">
+            <div class="filter-group">
+                <label>Search</label>
+                <input type="text" id="f-query" placeholder="Keyword or ID...">
+            </div>
+            <div class="filter-group">
+                <label>Status</label>
+                <select id="f-status"><option value="">All</option></select>
+            </div>
+            <div class="filter-group">
+                <label>Department</label>
+                <select id="f-dept"><option value="">All</option></select>
+            </div>
+            <div class="filter-group">
+                <label>POC</label>
+                <input type="text" id="f-poc" placeholder="Point of contact...">
+            </div>
+            <div class="filter-group">
+                <label>From</label>
+                <input type="date" id="f-from">
+            </div>
+            <div class="filter-group">
+                <label>To</label>
+                <input type="date" id="f-to">
+            </div>
+            <div class="filter-group">
+                <label>Sort</label>
+                <select id="f-sort">
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="id">ID</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" id="btn-filter">Filter</button>
+            <button class="btn btn-secondary" id="btn-clear">Clear</button>
+        </div>
+
+        <div id="results-info" class="subtitle"></div>
+
+        <div class="table-wrap">
+            <table>
+                <thead><tr>
+                    <th>ID</th><th>Status</th><th>Request</th><th>Department</th><th>POC</th><th>Date</th><th>Docs</th>
+                </tr></thead>
+                <tbody id="req-table"></tbody>
+            </table>
+        </div>
+
+        <div class="pagination" id="pagination"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/requests.js"></script>
+</body>
+</html>

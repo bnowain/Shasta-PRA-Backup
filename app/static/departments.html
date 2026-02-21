@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA — Departments</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <h1 class="page-title">Departments</h1>
+        <p class="subtitle">County departments that process public records requests</p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Department</th><th class="text-right">Requests</th></tr></thead>
+                <tbody id="dept-table"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/departments.js"></script>
+</body>
+</html>

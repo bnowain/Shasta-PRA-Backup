@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA — Request Detail</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <div id="detail-content" class="loading">Loading request...</div>
+    </div>
+
+    <div class="lightbox-overlay" id="lightbox">
+        <span class="lightbox-close" id="lb-close">&times;</span>
+        <div class="lightbox-content" id="lb-content"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/lightbox.js"></script>
+    <script src="/static/request-detail.js"></script>
+</body>
+</html>

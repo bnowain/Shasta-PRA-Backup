@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shasta PRA — Search</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="topbar">
+        <span class="logo">Shasta PRA</span>
+        <nav>
+            <a href="/">Dashboard</a>
+            <a href="/requests">Requests</a>
+            <a href="/departments">Departments</a>
+            <a href="/search">Search</a>
+            <a href="/analytics">Analytics</a>
+        </nav>
+    </div>
+
+    <div class="container">
+        <h1 class="page-title">Search</h1>
+        <p class="subtitle">Search across requests, timeline events, and documents</p>
+
+        <div class="filters">
+            <div class="filter-group" style="flex:1">
+                <input type="text" id="search-input" placeholder="Enter search term..." style="width:100%">
+            </div>
+            <button class="btn btn-primary" id="btn-search">Search</button>
+        </div>
+
+        <div id="search-results"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+    <script src="/static/search.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (large — not committed)
+shasta_nextrequest_backup/
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/

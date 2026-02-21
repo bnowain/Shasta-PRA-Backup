@@ -1,0 +1,8 @@
+requests>=2.28
+beautifulsoup4>=4.12
+lxml>=4.9
+tqdm>=4.65
+fastapi>=0.100
+uvicorn[standard]>=0.22
+sqlalchemy>=2.0
+pydantic>=2.0
