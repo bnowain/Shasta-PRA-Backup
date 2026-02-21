@@ -409,6 +409,26 @@ class Scraper:
     def phase3_details(self, resume_from=None):
         print("\n📄 Phase 3: Details + timelines + document lists...")
 
+        # Detect records marked as scraped but with incomplete data
+        incomplete = self.conn.execute("""
+            SELECT r.pretty_id FROM requests r
+            WHERE r.detail_scraped = 1 AND (
+                r.raw_detail_json IS NULL
+                OR r.request_text IS NULL OR r.request_text = ''
+                OR r.departments_json IS NULL
+                OR r.pretty_id NOT IN (
+                    SELECT DISTINCT request_pretty_id FROM timeline_events
+                )
+            )
+        """).fetchall()
+        if incomplete:
+            ids = [r[0] for r in incomplete]
+            self.conn.executemany(
+                "UPDATE requests SET detail_scraped=0 WHERE pretty_id=?",
+                [(pid,) for pid in ids])
+            self.conn.commit()
+            print(f"  ⚠️  {len(ids)} records with incomplete data queued for re-scrape")
+
         if resume_from:
             rows = self.conn.execute(
                 "SELECT pretty_id FROM requests WHERE pretty_id >= ? ORDER BY pretty_id",

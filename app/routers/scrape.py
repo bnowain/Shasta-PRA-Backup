@@ -70,12 +70,25 @@ def _worker(q):
         _send(q, "listings_done", f"Found {new_count} new requests ({after_req} total)", 35, new_requests=new_count)
 
         # ── Phase 3: Details ─────────────────────────────────────────
-        # Scrape: new records + non-closed records + records with changed status
+        # Detect records marked scraped but with incomplete data
+        incomplete_ids = {r[0] for r in conn.execute("""
+            SELECT r.pretty_id FROM requests r
+            WHERE r.detail_scraped = 1 AND (
+                r.raw_detail_json IS NULL
+                OR r.request_text IS NULL OR r.request_text = ''
+                OR r.departments_json IS NULL
+                OR r.pretty_id NOT IN (
+                    SELECT DISTINCT request_pretty_id FROM timeline_events
+                )
+            )
+        """).fetchall()}
+
+        # Scrape: new/unscraped + incomplete + non-closed + status-changed
         TERMINAL = ('closed', 'completed')
         new_ids = conn.execute(
             "SELECT pretty_id FROM requests WHERE detail_scraped=0"
         ).fetchall()
-        new_set = {r[0] for r in new_ids}
+        new_set = {r[0] for r in new_ids} | incomplete_ids
 
         active_ids = conn.execute(
             "SELECT pretty_id FROM requests WHERE detail_scraped=1"
