@@ -181,11 +181,12 @@ def _worker(q):
 
                     success, sha_or_err, size = api.download_file(signed_url, path)
                     if success:
+                        size_mb = round(size / (1024 * 1024), 2)
                         conn.execute("""
                             UPDATE documents
-                            SET downloaded=1, local_path=?, sha256=?, file_size_bytes=?
+                            SET downloaded=1, local_path=?, sha256=?, file_size_bytes=?, file_size_mb=?
                             WHERE id=?
-                        """, (str(path), sha_or_err, size, doc_id))
+                        """, (str(path), sha_or_err, size, size_mb, doc_id))
                         dl_ok += 1
                     else:
                         dl_fail += 1
@@ -207,6 +208,80 @@ def _worker(q):
             if dl_fail:
                 parts.append(f"{dl_fail} failed")
             _send(q, "downloads_done", f"Documents: {', '.join(parts)}", 95)
+
+        # ── Phase 5: Convert document previews ─────────────────────
+        from app.config import CONVERTIBLE_EXTENSIONS, SOFFICE_PATH
+        from app.routers.documents import convert_to_pdf
+
+        convertible = conn.execute(f"""
+            SELECT id, title, file_extension, local_path
+            FROM documents
+            WHERE downloaded = 1
+              AND local_path IS NOT NULL
+              AND LOWER(file_extension) IN ({','.join(f"'{e}'" for e in CONVERTIBLE_EXTENSIONS)})
+            ORDER BY id
+        """).fetchall()
+
+        to_convert = []
+        for row in convertible:
+            doc_id, title, ext, local_path = row
+            fp = Path(local_path)
+            if not fp.is_absolute():
+                from app.config import BASE_DIR
+                fp = BASE_DIR / fp
+            cache = fp.parent / (fp.name + ".preview.pdf")
+            if fp.exists() and not cache.exists():
+                to_convert.append((doc_id, title, ext, fp, cache))
+
+        if to_convert:
+            _send(q, "converting", f"Converting {len(to_convert)} documents to PDF...", 93)
+            cv_ok = cv_fail = 0
+            for k, (doc_id, title, ext, fp, cache) in enumerate(to_convert):
+                _send(q, "converting",
+                      f"Converting {title or f'doc {doc_id}'} ({k+1}/{len(to_convert)})...",
+                      93 + int(((k+1) / len(to_convert)) * 2))  # 93→95
+                try:
+                    if convert_to_pdf(fp, cache, timeout=180):
+                        cv_ok += 1
+                    else:
+                        cv_fail += 1
+                except Exception:
+                    cv_fail += 1
+            parts_cv = [f"{cv_ok} converted"]
+            if cv_fail:
+                parts_cv.append(f"{cv_fail} failed")
+            _send(q, "converting_done", f"Previews: {', '.join(parts_cv)}", 95)
+
+        # ── Phase 6: Transcribe audio/video ──────────────────────────
+        from app.services.transcription import is_civic_media_available, transcribe_document, get_untranscribed_documents
+
+        if is_civic_media_available():
+            untranscribed = get_untranscribed_documents(conn)
+            tr_total = len(untranscribed)
+            if tr_total == 0:
+                _send(q, "transcribing", "No audio/video files to transcribe", 99)
+            else:
+                _send(q, "transcribing", f"Transcribing {tr_total} audio/video files...", 96)
+                tr_ok = tr_fail = 0
+                for k, doc in enumerate(untranscribed):
+                    progress = 96 + int(((k + 1) / tr_total) * 3)  # 96→99
+                    doc_label = doc['title'] or f"doc {doc['id']}"
+                    _send(q, "transcribing",
+                          f"Transcribing {doc_label} ({k+1}/{tr_total})...",
+                          progress, current=k + 1, total=tr_total)
+                    result = transcribe_document(
+                        conn, doc["id"], doc["local_path"],
+                        doc["file_extension"], doc.get("title", ""))
+                    if result["success"]:
+                        tr_ok += 1
+                    else:
+                        tr_fail += 1
+                parts_tr = [f"{tr_ok} transcribed"]
+                if tr_fail:
+                    parts_tr.append(f"{tr_fail} failed")
+                _send(q, "transcribing_done", f"Transcriptions: {', '.join(parts_tr)}", 99)
+        else:
+            _send(q, "transcribing", "Skipping transcription (civic_media not running)", 99)
 
         # ── Done ─────────────────────────────────────────────────────
         final_req = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]

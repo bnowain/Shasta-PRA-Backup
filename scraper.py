@@ -156,6 +156,32 @@ def init_db(db_path):
             timestamp TEXT DEFAULT (datetime('now'))
         );
 
+        CREATE TABLE IF NOT EXISTS document_text (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            page_number INTEGER NOT NULL DEFAULT 0,
+            text_content TEXT NOT NULL,
+            method TEXT NOT NULL,
+            segments_json TEXT,
+            duration_seconds REAL,
+            processing_seconds REAL,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (document_id) REFERENCES documents(id),
+            UNIQUE(document_id, page_number, method)
+        );
+
+        CREATE TABLE IF NOT EXISTS processing_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL,
+            operation TEXT NOT NULL,
+            status TEXT NOT NULL,
+            error_message TEXT,
+            started_at TEXT,
+            completed_at TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (document_id) REFERENCES documents(id)
+        );
+
         CREATE INDEX IF NOT EXISTS idx_tl_req ON timeline_events(request_pretty_id);
         CREATE INDEX IF NOT EXISTS idx_doc_req ON documents(request_pretty_id);
         CREATE INDEX IF NOT EXISTS idx_doc_dl ON documents(downloaded);
@@ -686,11 +712,12 @@ class Scraper:
                 success, sha_or_err, size = self.api.download_file(signed_url, path)
 
                 if success:
+                    size_mb = round(size / (1024 * 1024), 2)
                     self.conn.execute("""
                         UPDATE documents
-                        SET downloaded=1, local_path=?, sha256=?, file_size_bytes=?
+                        SET downloaded=1, local_path=?, sha256=?, file_size_bytes=?, file_size_mb=?
                         WHERE id=?
-                    """, (str(path), sha_or_err, size, doc_id))
+                    """, (str(path), sha_or_err, size, size_mb, doc_id))
                     ok += 1
                 else:
                     fail += 1
