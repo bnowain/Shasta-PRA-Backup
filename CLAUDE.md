@@ -30,6 +30,8 @@ app/
 │   ├── search.py     # /api/search
 │   ├── stats.py      # /api/stats
 │   └── documents.py  # /api/documents/{id}/file
+├── services/
+│   └── transcription.py  # Whisper transcription client (calls civic_media)
 └── static/           # Frontend HTML/JS/CSS
 ```
 
@@ -44,11 +46,95 @@ app/
 | GET | `/api/departments/{id}/requests` | Requests for a department |
 | GET | `/api/search?q=` | Full-text search across all tables |
 | GET | `/api/stats` | Aggregate statistics |
-| GET | `/api/documents/{id}/file` | Serve downloaded document file |
+| GET | `/api/documents` | List/filter documents (q, ext, date_from, date_to, sort, limit, offset) |
+| GET | `/api/documents/extensions` | File type counts for filter dropdown |
+| GET | `/api/documents/{id}/file` | Serve original downloaded document |
+| GET | `/api/documents/{id}/preview` | Preview with on-demand conversion (PDF/images inline, Office→PDF) |
+| GET | `/api/documents/transcription-status` | Transcription summary: total, transcribed, pending, failed |
+| GET | `/api/documents/{id}/transcript` | Get stored transcription (text + segments with timestamps) |
+| POST | `/api/documents/{id}/transcribe` | Manual trigger — sends file to civic_media for Whisper transcription |
 
 ## Database
 
-SQLite at `shasta_nextrequest_backup/nextrequest.db`. Tables: `requests`, `timeline_events`, `documents`, `departments`, `scrape_log`. Schema created by `scraper.py` (raw sqlite3, not ORM). All API access is read-only via parameterized `text()` queries.
+SQLite at `shasta_nextrequest_backup/nextrequest.db`. Tables: `requests`, `timeline_events`, `documents`, `departments`, `scrape_log`, `document_text`, `processing_log`. Schema created by `scraper.py` (raw sqlite3, not ORM). All API access is read-only via parameterized `text()` queries.
+
+## Document Processing Pipeline
+
+Documents go through three post-download processing stages. All run automatically during scrape and have standalone batch scripts for backfilling.
+
+### 1. LibreOffice PDF Conversion (Office docs → inline preview)
+
+Converts Office documents (DOCX, DOC, XLSX, XLS, PPTX, PPT, ODT, ODS, ODP, RTF) to PDF for browser-native preview display.
+
+**How it works:**
+- Uses LibreOffice headless: `soffice --headless --convert-to pdf --outdir <tmpdir> <source>`
+- Converts in a temp directory, then copies result alongside the original as `{filename}.preview.pdf`
+- Cross-drive safe: uses `shutil.copy2()` instead of `Path.replace()` (Windows C:→E: issue)
+- Preview endpoint serves cached PDF; creates on-demand if missing (with 50 MB size guard)
+
+**Key files:**
+- `app/config.py` — `SOFFICE_PATH` (auto-detects local portable or Program Files install), `CONVERTIBLE_EXTENSIONS` set
+- `app/routers/documents.py` — `convert_to_pdf(source, cache_path, timeout=120)` reusable function
+- `convert_previews.py` — Batch script: `python convert_previews.py [--force] [--dry-run]`
+- `app/routers/scrape.py` — Phase 5: auto-converts after document downloads
+
+**LibreOffice install:** `winget install --id TheDocumentFoundation.LibreOffice` (or portable via `setup_libreoffice.py`)
+
+**File naming:** `documents/24-4/report.docx` → `documents/24-4/report.docx.preview.pdf`
+
+### 2. Whisper Transcription (Audio/Video → searchable text)
+
+Transcribes audio/video documents (MP4, MKV, M4A, WAV, etc.) via civic_media's faster-whisper GPU endpoint.
+
+**How it works:**
+- Sends file to `POST http://127.0.0.1:8000/api/transcribe` (civic_media)
+- civic_media extracts audio (ffmpeg → 16kHz mono WAV), runs faster-whisper large-v3 on GPU
+- Returns full text + timestamped segments; stored in `document_text` table
+- If civic_media is down, skips gracefully — manual trigger available in lightbox UI
+
+**Key files:**
+- `app/config.py` — `CIVIC_MEDIA_URL`, `TRANSCRIBABLE_EXTENSIONS`, timeout settings
+- `app/services/transcription.py` — `is_civic_media_available()`, `transcribe_document()`, `get_untranscribed_documents()`
+- `app/routers/documents.py` — `POST /{id}/transcribe` (manual), `GET /{id}/transcript`, `GET /transcription-status`
+- `app/routers/scrape.py` — Phase 6: auto-transcribes after document downloads
+- `transcribe_documents.py` — Batch script: `python transcribe_documents.py [--force] [--dry-run] [--limit N]`
+- `app/static/lightbox.js` — Transcript display below audio/video player in lightbox
+
+**Database:** `document_text` table (shared with OCR), `processing_log` for status tracking
+
+**Search:** `document_text.text_content` is included in `/api/search` results
+
+### 3. OCR & Text Extraction (planned)
+
+Extracts text from all documents for full-text search and creates searchable PDFs for scanned documents.
+
+**Tech stack:** PyMuPDF (fitz) + EasyOCR (handles handwriting)
+
+**Processing strategy:**
+| Type | Method |
+|------|--------|
+| PDF with native text | PyMuPDF text extraction |
+| Scanned/image PDF | Render pages → EasyOCR → store text + create `.searchable.pdf` with invisible text overlay |
+| Mixed PDF | Per-page: native where available, OCR where scanned |
+| Office docs | Extract from existing `.preview.pdf` via PyMuPDF |
+| TXT, CSV | Read directly |
+| JPG, PNG, TIF | EasyOCR on image |
+
+**Database:** `document_text` table (per-page, with FTS5 index) + `ocr_processing_log` for resume capability
+
+**Batch script:** `python ocr_documents.py [--force] [--dry-run] [--pdf-only] [--limit N]`
+
+**File naming:** `documents/24-4/scan.pdf` → `documents/24-4/scan.pdf.searchable.pdf`
+
+### Reusable Patterns for Other Projects
+
+All processing stages follow the same pattern:
+1. **Reusable function** in a router/module (`convert_to_pdf()`, `transcribe_document()`, `process_document()`)
+2. **Standalone batch script** for backfill with `--force`, `--dry-run`, progress reporting
+3. **Post-scrape SSE phase** in `scrape.py` for auto-processing new downloads
+4. **Cache file alongside original** with naming convention: `{original}.{purpose}.{ext}`
+5. **Processing log table** for resume capability (skip already-processed on re-run)
+6. **Size/page guards** to prevent runaway on large files
 
 ## Atlas Integration
 

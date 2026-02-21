@@ -7,6 +7,9 @@ __pycache__/
 # Data (large — not committed)
 shasta_nextrequest_backup/
 
+# Local tools (LibreOffice Portable, etc.)
+tools/
+
 # IDE
 .vscode/
 .idea/

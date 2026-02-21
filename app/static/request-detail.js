@@ -1,5 +1,21 @@
 /* Request detail page — metadata, timeline, documents */
 
+function cleanTimelineHtml(raw) {
+    // Replace <br>, <br/>, <p>, </p> with line breaks, strip all other tags
+    let text = raw
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/p>/gi, '\n')
+        .replace(/<[^>]+>/g, '')
+        .trim();
+    // Escape for safe display, then convert newlines to <br>
+    const lines = text.split('\n').filter(l => l.trim());
+    if (lines.length <= 1) return escapeHtml(text);
+    // Multiple items — show as a compact list
+    return '<ul class="tl-file-list">' +
+        lines.map(l => `<li>${escapeHtml(l.trim())}</li>`).join('') +
+        '</ul>';
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const pathParts = location.pathname.split('/');
     const prettyId = decodeURIComponent(pathParts[pathParts.length - 1]);
@@ -28,7 +44,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                             <div class="timeline-item">
                                 <div class="tl-text">
                                     ${t.timeline_icon_class ? `<i class="${escapeHtml(t.timeline_icon_class)} tl-icon"></i>` : ''}
-                                    ${escapeHtml(t.timeline_display_text || t.timeline_name || '')}
+                                    ${cleanTimelineHtml(t.timeline_display_text || t.timeline_name || '')}
                                 </div>
                                 ${t.timeline_byline ? `<div class="tl-byline">${escapeHtml(t.timeline_byline)}</div>` : ''}
                             </div>

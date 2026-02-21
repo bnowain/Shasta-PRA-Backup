@@ -42,12 +42,13 @@ def search_all(
         LIMIT :limit
     """), {"q": pattern, "limit": limit}).mappings().all()
 
-    # Search documents
+    # Search documents (title + transcription text)
     doc_rows = conn.execute(text("""
-        SELECT id, title, file_extension, file_size_mb, upload_date,
-               downloaded, local_path, asset_url, request_pretty_id
-        FROM documents
-        WHERE title LIKE :q
+        SELECT DISTINCT d.id, d.title, d.file_extension, d.file_size_mb, d.upload_date,
+               d.downloaded, d.local_path, d.asset_url, d.request_pretty_id
+        FROM documents d
+        LEFT JOIN document_text dt ON dt.document_id = d.id
+        WHERE d.title LIKE :q OR dt.text_content LIKE :q
         LIMIT :limit
     """), {"q": pattern, "limit": limit}).mappings().all()
 

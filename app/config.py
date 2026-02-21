@@ -11,6 +11,18 @@ DATABASE_URL = f"sqlite:///{DB_PATH}"
 
 PORT = 8845
 
+# civic_media transcription service
+CIVIC_MEDIA_URL = "http://127.0.0.1:8000"
+TRANSCRIBE_ENDPOINT = f"{CIVIC_MEDIA_URL}/api/transcribe"
+TRANSCRIBABLE_EXTENSIONS = {"mp4", "mkv", "mov", "avi", "webm",
+                            "mp3", "m4a", "wav", "ogg", "flac"}
+TRANSCRIBE_CONNECT_TIMEOUT = 3     # fast fail if civic_media is down
+TRANSCRIBE_READ_TIMEOUT = 900      # 15 min for large files
+
 # LibreOffice headless conversion for document preview
-SOFFICE_PATH = shutil.which("soffice") or "soffice"
+_SOFFICE_CANDIDATES = [
+    BASE_DIR / "tools" / "LibreOffice" / "App" / "libreoffice" / "program" / "soffice.exe",
+    Path("C:/Program Files/LibreOffice/program/soffice.exe"),
+]
+SOFFICE_PATH = next((str(p) for p in _SOFFICE_CANDIDATES if p.exists()), None) or shutil.which("soffice") or "soffice"
 CONVERTIBLE_EXTENSIONS = {"docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf"}

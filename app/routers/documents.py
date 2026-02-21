@@ -1,5 +1,7 @@
 """Document file serving, listing, and preview conversion."""
 
+import json
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -10,7 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from app.config import BASE_DIR, DOCS_DIR, SOFFICE_PATH, CONVERTIBLE_EXTENSIONS
+from app.config import BASE_DIR, DOCS_DIR, SOFFICE_PATH, CONVERTIBLE_EXTENSIONS, TRANSCRIBABLE_EXTENSIONS
 from app.database import get_db
 from app import schemas
 
@@ -38,6 +40,9 @@ _MEDIA_TYPES = {
     "csv": "text/csv",
 }
 
+# Max file size for on-demand conversion (50 MB)
+_MAX_ONDEMAND_MB = 50
+
 
 def _resolve_doc_path(doc: dict) -> Path:
     """Resolve and validate a document's file path."""
@@ -60,6 +65,34 @@ def _resolve_doc_path(doc: dict) -> Path:
         raise HTTPException(404, "File not found on disk")
 
     return resolved
+
+
+def convert_to_pdf(source: Path, cache_path: Path, timeout: int = 120) -> bool:
+    """Convert a document to PDF using LibreOffice headless.
+
+    Returns True on success, False on failure. Raises FileNotFoundError
+    if LibreOffice is not installed.
+    """
+    if cache_path.exists():
+        return True
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [SOFFICE_PATH, "--headless", "--convert-to", "pdf",
+             "--outdir", tmpdir, str(source)],
+            capture_output=True, timeout=timeout,
+        )
+        if result.returncode != 0:
+            return False
+
+        tmp_path = Path(tmpdir)
+        pdf_files = list(tmp_path.glob("*.pdf"))
+        if not pdf_files:
+            return False
+
+        shutil.copy2(str(pdf_files[0]), str(cache_path))
+
+    return True
 
 
 # ── List documents ────────────────────────────────────────────────────────────
@@ -142,12 +175,47 @@ def list_extensions(conn: Connection = Depends(get_db)):
     return [{"ext": r["ext"], "count": r["cnt"]} for r in rows]
 
 
+# ── Transcription status ──────────────────────────────────────────────────────
+
+@router.get("/transcription-status", response_model=schemas.TranscriptionStatus)
+def transcription_status(conn: Connection = Depends(get_db)):
+    ext_list = ",".join(f"'{e}'" for e in TRANSCRIBABLE_EXTENSIONS)
+
+    total = conn.execute(text(f"""
+        SELECT COUNT(*) FROM documents
+        WHERE downloaded = 1 AND local_path IS NOT NULL
+          AND LOWER(file_extension) IN ({ext_list})
+    """)).scalar()
+
+    transcribed = conn.execute(text(f"""
+        SELECT COUNT(DISTINCT dt.document_id) FROM document_text dt
+        JOIN documents d ON d.id = dt.document_id
+        WHERE dt.method = 'whisper'
+          AND LOWER(d.file_extension) IN ({ext_list})
+    """)).scalar()
+
+    failed = conn.execute(text(f"""
+        SELECT COUNT(DISTINCT pl.document_id) FROM processing_log pl
+        JOIN documents d ON d.id = pl.document_id
+        WHERE pl.operation = 'transcribe' AND pl.status = 'failed'
+          AND LOWER(d.file_extension) IN ({ext_list})
+          AND pl.document_id NOT IN (SELECT document_id FROM document_text WHERE method = 'whisper')
+    """)).scalar()
+
+    return schemas.TranscriptionStatus(
+        total_transcribable=total,
+        transcribed=transcribed,
+        pending=total - transcribed - failed,
+        failed=failed,
+    )
+
+
 # ── Preview endpoint (with LibreOffice conversion) ────────────────────────────
 
 @router.get("/{doc_id}/preview")
 def preview_document(doc_id: int, conn: Connection = Depends(get_db)):
     row = conn.execute(
-        text("SELECT local_path, title, file_extension, downloaded FROM documents WHERE id = :did"),
+        text("SELECT local_path, title, file_extension, downloaded, file_size_mb FROM documents WHERE id = :did"),
         {"did": doc_id},
     ).mappings().first()
 
@@ -163,37 +231,26 @@ def preview_document(doc_id: int, conn: Connection = Depends(get_db)):
         media_type = _MEDIA_TYPES.get(ext, "application/octet-stream")
         return FileResponse(str(resolved), media_type=media_type)
 
-    # Office types — convert to PDF via LibreOffice
+    # Office types — serve cached PDF or convert on demand
     if ext in CONVERTIBLE_EXTENSIONS:
         resolved = _resolve_doc_path(doc)
         cache_path = resolved.parent / (resolved.name + ".preview.pdf")
 
+        # Serve from cache
         if cache_path.exists():
             return FileResponse(str(cache_path), media_type="application/pdf")
 
-        # Convert using LibreOffice headless
+        # Size guard for on-demand conversion
+        size_mb = doc.get("file_size_mb") or 0
+        if size_mb > _MAX_ONDEMAND_MB:
+            raise HTTPException(
+                413,
+                f"File too large for on-demand conversion ({size_mb:.1f} MB). "
+                f"Run 'python convert_previews.py' to batch-convert."
+            )
+
         try:
-            with tempfile.TemporaryDirectory() as tmpdir:
-                result = subprocess.run(
-                    [SOFFICE_PATH, "--headless", "--convert-to", "pdf",
-                     "--outdir", tmpdir, str(resolved)],
-                    capture_output=True, timeout=60,
-                )
-                if result.returncode != 0:
-                    raise HTTPException(
-                        500,
-                        f"LibreOffice conversion failed: {result.stderr.decode(errors='replace')[:200]}"
-                    )
-
-                # Find the output PDF in temp dir
-                tmp_path = Path(tmpdir)
-                pdf_files = list(tmp_path.glob("*.pdf"))
-                if not pdf_files:
-                    raise HTTPException(500, "Conversion produced no PDF output")
-
-                # Move to cache location
-                pdf_files[0].replace(cache_path)
-
+            ok = convert_to_pdf(resolved, cache_path)
         except FileNotFoundError:
             raise HTTPException(
                 501,
@@ -201,6 +258,9 @@ def preview_document(doc_id: int, conn: Connection = Depends(get_db)):
             )
         except subprocess.TimeoutExpired:
             raise HTTPException(504, "Conversion timed out")
+
+        if not ok:
+            raise HTTPException(500, "LibreOffice conversion failed")
 
         return FileResponse(str(cache_path), media_type="application/pdf")
 
@@ -237,3 +297,69 @@ def serve_document(doc_id: int, conn: Connection = Depends(get_db)):
     if ext and not filename.endswith(f".{ext}"):
         filename = f"{filename}.{ext}"
     return FileResponse(str(resolved), media_type=media_type, filename=filename)
+
+
+# ── Transcription endpoints ──────────────────────────────────────────────────
+
+@router.get("/{doc_id}/transcript", response_model=schemas.TranscriptionResult)
+def get_transcript(doc_id: int, conn: Connection = Depends(get_db)):
+    row = conn.execute(text(
+        "SELECT document_id, text_content, segments_json, duration_seconds, "
+        "processing_seconds, method, created_at "
+        "FROM document_text WHERE document_id = :did AND method = 'whisper'"
+    ), {"did": doc_id}).mappings().first()
+
+    if not row:
+        raise HTTPException(404, "No transcription found for this document")
+
+    r = dict(row)
+    segments = json.loads(r["segments_json"]) if r.get("segments_json") else []
+
+    return schemas.TranscriptionResult(
+        document_id=r["document_id"],
+        text=r["text_content"],
+        segments=[schemas.TranscriptionSegment(**s) for s in segments],
+        duration_seconds=r.get("duration_seconds"),
+        processing_seconds=r.get("processing_seconds"),
+        method=r["method"],
+        created_at=r.get("created_at"),
+    )
+
+
+@router.post("/{doc_id}/transcribe")
+def transcribe_document_endpoint(doc_id: int, conn: Connection = Depends(get_db)):
+    from app.services.transcription import is_civic_media_available, transcribe_document
+
+    # Get document info
+    row = conn.execute(text(
+        "SELECT id, title, file_extension, local_path, downloaded FROM documents WHERE id = :did"
+    ), {"did": doc_id}).mappings().first()
+
+    if not row:
+        raise HTTPException(404, "Document not found")
+
+    doc = dict(row)
+    ext = (doc.get("file_extension") or "").lower()
+
+    if ext not in TRANSCRIBABLE_EXTENSIONS:
+        raise HTTPException(400, f".{ext} files are not transcribable")
+
+    if not doc["downloaded"] or not doc["local_path"]:
+        raise HTTPException(404, "Document file not available (metadata only)")
+
+    if not is_civic_media_available():
+        raise HTTPException(503, "Transcription service (civic_media) is not running. Start it and try again.")
+
+    result = transcribe_document(
+        conn, doc["id"], doc["local_path"], ext, doc.get("title", ""))
+
+    if not result["success"]:
+        raise HTTPException(500, f"Transcription failed: {result['error']}")
+
+    return {
+        "success": True,
+        "document_id": doc_id,
+        "segment_count": result["segment_count"],
+        "duration_seconds": result["duration"],
+        "text_preview": result["text"][:200] + "..." if len(result["text"]) > 200 else result["text"],
+    }

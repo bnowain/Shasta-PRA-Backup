@@ -245,6 +245,21 @@ tbody tr { cursor: pointer; }
 .timeline-item .tl-icon { color: var(--accent); margin-right: .5rem; }
 .timeline-item .tl-text { font-size: .9rem; text-align: left; }
 .timeline-item .tl-byline { font-size: .78rem; color: var(--text-dim); margin-top: .2rem; text-align: left; }
+.tl-file-list {
+    list-style: none;
+    padding: 0;
+    margin: .25rem 0 0;
+    font-size: .82rem;
+    color: var(--text-dim);
+    max-height: 200px;
+    overflow-y: auto;
+}
+.tl-file-list li {
+    padding: .15rem 0;
+    border-bottom: 1px solid var(--border);
+    word-break: break-word;
+}
+.tl-file-list li:last-child { border-bottom: none; }
 
 /* ── Document Table ───────────────────────────────────────────────────────── */
 .doc-row { cursor: pointer; }
@@ -327,6 +342,44 @@ tbody tr { cursor: pointer; }
 .btn-sm { padding: .3rem .6rem; font-size: .78rem; }
 .lb-pdf { width: 85vw; height: calc(85vh - 48px); border: none; }
 .lb-fallback { padding: 3rem; text-align: center; color: var(--text-dim); }
+.lb-loading {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 4rem 2rem; color: var(--text-dim); gap: 1rem;
+}
+.lb-spinner {
+    width: 40px; height: 40px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: lb-spin 0.8s linear infinite;
+}
+@keyframes lb-spin { to { transform: rotate(360deg); } }
+
+/* Lightbox — transcript panel */
+.lb-audio-wrap { padding: 2rem; text-align: center; }
+.lb-transcript-panel { border-top: 1px solid var(--border); }
+.lb-transcript-actions {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .5rem .75rem; background: var(--bg); min-height: 40px;
+}
+.lb-transcript-meta { font-size: .78rem; color: var(--text-dim); }
+.lb-transcript-loading {
+    display: flex; align-items: center; gap: .5rem;
+    font-size: .82rem; color: var(--text-dim);
+}
+.lb-transcript-body { max-height: 300px; overflow-y: auto; }
+.lb-segments { padding: .25rem .75rem; }
+.lb-segment {
+    display: flex; gap: .75rem; padding: .3rem 0;
+    border-bottom: 1px solid var(--border); font-size: .82rem;
+    align-items: baseline;
+}
+.lb-segment:last-child { border-bottom: none; }
+.lb-seg-time {
+    flex-shrink: 0; width: 52px; font-family: monospace;
+    font-size: .75rem; color: var(--accent); user-select: all;
+}
+.lb-seg-text { color: var(--text); line-height: 1.5; }
 
 /* ── Charts ───────────────────────────────────────────────────────────────── */
 .chart-container {

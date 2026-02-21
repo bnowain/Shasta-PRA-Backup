@@ -101,3 +101,30 @@ class StatsOut(BaseModel):
     status_breakdown: list[StatusBreakdown] = []
     department_breakdown: list[DepartmentBreakdown] = []
     requests_by_month: list[MonthCount] = []
+
+
+# ── Transcription models ─────────────────────────────────────────────────────
+
+class TranscriptionSegment(BaseModel):
+    start: float
+    end: float
+    text: str
+    avg_logprob: float = 0.0
+    no_speech_prob: float = 0.0
+
+
+class TranscriptionResult(BaseModel):
+    document_id: int
+    text: str
+    segments: list[TranscriptionSegment] = []
+    duration_seconds: Optional[float] = None
+    processing_seconds: Optional[float] = None
+    method: str = "whisper"
+    created_at: Optional[str] = None
+
+
+class TranscriptionStatus(BaseModel):
+    total_transcribable: int = 0
+    transcribed: int = 0
+    pending: int = 0
+    failed: int = 0

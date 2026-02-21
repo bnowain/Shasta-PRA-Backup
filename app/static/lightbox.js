@@ -1,6 +1,110 @@
 /* Lightbox — modal viewer for documents (PDF, images, video, audio)
    Uses /api/documents/{id}/preview for display, /api/documents/{id}/file for download */
 
+const _MEDIA_EXTENSIONS = ['mp4','webm','mov','avi','mkv','mp3','m4a','wav','ogg','flac'];
+
+function _transcriptPanel(docId) {
+    return `<div class="lb-transcript-panel" id="lb-transcript-panel">
+        <div class="lb-transcript-actions" id="lb-transcript-actions">
+            <button class="btn btn-secondary btn-sm" onclick="loadTranscript(${docId})">Show Transcript</button>
+        </div>
+        <div class="lb-transcript-body" id="lb-transcript-body" style="display:none"></div>
+    </div>`;
+}
+
+function formatTimestamp(seconds) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = Math.floor(seconds % 60);
+    if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    return `${m}:${String(s).padStart(2,'0')}`;
+}
+
+async function loadTranscript(docId) {
+    const actions = document.getElementById('lb-transcript-actions');
+    const body = document.getElementById('lb-transcript-body');
+
+    actions.innerHTML = '<span class="lb-transcript-loading">Loading transcript...</span>';
+    body.style.display = 'none';
+
+    try {
+        const resp = await fetch(`/api/documents/${docId}/transcript`);
+
+        if (resp.status === 404) {
+            // No transcript yet — offer to transcribe
+            actions.innerHTML = `
+                <span style="color:var(--text-dim);font-size:.82rem">No transcript available</span>
+                <button class="btn btn-primary btn-sm" onclick="triggerTranscribe(${docId})">Transcribe</button>`;
+            return;
+        }
+
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const data = await resp.json();
+        actions.innerHTML = `
+            <button class="btn btn-secondary btn-sm" onclick="toggleTranscript()">Hide Transcript</button>
+            <span class="lb-transcript-meta">${data.segments.length} segments | ${formatTimestamp(data.duration_seconds || 0)}</span>`;
+
+        let html = '<div class="lb-segments">';
+        for (const seg of data.segments) {
+            const ts = formatTimestamp(seg.start);
+            html += `<div class="lb-segment">
+                <span class="lb-seg-time">${ts}</span>
+                <span class="lb-seg-text">${escapeHtml(seg.text)}</span>
+            </div>`;
+        }
+        html += '</div>';
+
+        body.innerHTML = html;
+        body.style.display = '';
+
+    } catch (err) {
+        actions.innerHTML = `<span class="error" style="font-size:.82rem">Failed to load transcript: ${escapeHtml(err.message)}</span>`;
+    }
+}
+
+function toggleTranscript() {
+    const body = document.getElementById('lb-transcript-body');
+    const actions = document.getElementById('lb-transcript-actions');
+    if (body.style.display === 'none') {
+        body.style.display = '';
+        actions.querySelector('button').textContent = 'Hide Transcript';
+    } else {
+        body.style.display = 'none';
+        actions.querySelector('button').textContent = 'Show Transcript';
+    }
+}
+
+async function triggerTranscribe(docId) {
+    const actions = document.getElementById('lb-transcript-actions');
+    actions.innerHTML = `
+        <div class="lb-transcript-loading">
+            <div class="lb-spinner" style="width:20px;height:20px;border-width:2px"></div>
+            <span>Transcribing... this may take several minutes</span>
+        </div>`;
+
+    try {
+        const resp = await fetch(`/api/documents/${docId}/transcribe`, { method: 'POST' });
+
+        if (resp.status === 503) {
+            actions.innerHTML = `<span class="error" style="font-size:.82rem">Transcription service not running. Start civic_media first.</span>`;
+            return;
+        }
+
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            throw new Error(err.detail || `HTTP ${resp.status}`);
+        }
+
+        // Transcription complete — load the transcript
+        await loadTranscript(docId);
+
+    } catch (err) {
+        actions.innerHTML = `<span class="error" style="font-size:.82rem">Transcription failed: ${escapeHtml(err.message)}</span>`;
+    }
+}
+
+
 function openLightbox(doc) {
     const overlay = document.getElementById('lightbox');
     const content = document.getElementById('lb-content');
@@ -9,6 +113,7 @@ function openLightbox(doc) {
     const previewUrl = `/api/documents/${doc.id}/preview`;
     const fileUrl = `/api/documents/${doc.id}/file`;
     const title = escapeHtml(doc.title || 'Document');
+    const isMedia = _MEDIA_EXTENSIONS.includes(ext);
 
     // Toolbar always shown
     const toolbar = `
@@ -23,9 +128,7 @@ function openLightbox(doc) {
     let body = '';
 
     if (ext === 'pdf') {
-        body = `<object data="${previewUrl}" type="application/pdf" class="lb-pdf">
-            <iframe src="${previewUrl}" title="${title}"></iframe>
-        </object>`;
+        body = `<embed src="${previewUrl}" type="application/pdf" class="lb-pdf">`;
     } else if (['jpg','jpeg','png','gif','bmp','webp','svg'].includes(ext)) {
         body = `<img src="${fileUrl}" alt="${title}">`;
     } else if (['tif','tiff'].includes(ext)) {
@@ -34,18 +137,30 @@ function openLightbox(doc) {
             <p>TIFF preview not supported in browsers</p>
             <a href="${fileUrl}" download class="btn btn-primary">Download File</a>
         </div>`;
-    } else if (['mp4','webm','mov','avi'].includes(ext)) {
+    } else if (['mp4','webm','mov','avi','mkv'].includes(ext)) {
         body = `<video controls autoplay><source src="${fileUrl}">Your browser does not support video.</video>`;
+        body += _transcriptPanel(doc.id);
     } else if (['mp3','m4a','wav','ogg','flac'].includes(ext)) {
-        body = `<div class="lb-fallback">
+        body = `<div class="lb-audio-wrap">
             <p style="font-weight:600;margin-bottom:1rem">${title}</p>
             <audio controls autoplay><source src="${fileUrl}">Your browser does not support audio.</audio>
         </div>`;
+        body += _transcriptPanel(doc.id);
     } else if (['docx','doc','xlsx','xls','pptx','ppt','odt','ods','odp','rtf'].includes(ext)) {
-        // Office docs — preview endpoint converts to PDF
-        body = `<object data="${previewUrl}" type="application/pdf" class="lb-pdf">
-            <iframe src="${previewUrl}" title="${title}"></iframe>
-        </object>`;
+        // Office docs — preview endpoint converts to PDF via LibreOffice
+        // Show loading indicator while conversion happens
+        body = `<div class="lb-loading" id="lb-loading">
+            <div class="lb-spinner"></div>
+            <p>Converting document to PDF...</p>
+        </div>
+        <embed src="${previewUrl}" type="application/pdf" class="lb-pdf" style="display:none" onload="this.style.display='';var l=document.getElementById('lb-loading');if(l)l.remove();">`;
+        // Fallback: hide spinner after timeout in case onload doesn't fire
+        setTimeout(() => {
+            const loading = document.getElementById('lb-loading');
+            const embed = content.querySelector('embed.lb-pdf');
+            if (loading) loading.remove();
+            if (embed) embed.style.display = '';
+        }, 15000);
     } else {
         body = `<div class="lb-fallback">
             <p>Preview not available for .${escapeHtml(ext)} files</p>
