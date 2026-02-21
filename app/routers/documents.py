@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from app.config import DOCS_DIR
+from app.config import BASE_DIR, DOCS_DIR
 from app.database import get_db
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -29,7 +29,7 @@ def serve_document(doc_id: int, conn: Connection = Depends(get_db)):
 
     file_path = Path(doc["local_path"])
     if not file_path.is_absolute():
-        file_path = DOCS_DIR / file_path
+        file_path = BASE_DIR / file_path
 
     # Path traversal protection
     try:
@@ -63,8 +63,15 @@ def serve_document(doc_id: int, conn: Connection = Depends(get_db)):
         "csv": "text/csv",
     }
     media_type = media_types.get(ext, "application/octet-stream")
+
+    # Viewable types: serve inline so iframes/embeds work
+    inline_types = {"pdf", "jpg", "jpeg", "png", "gif", "webp", "bmp",
+                    "mp4", "webm", "mp3", "m4a", "wav", "ogg", "txt", "csv"}
+    if ext in inline_types:
+        return FileResponse(str(resolved), media_type=media_type)
+
+    # Everything else: serve as download with filename
     filename = doc.get("title") or f"document_{doc_id}"
     if ext and not filename.endswith(f".{ext}"):
         filename = f"{filename}.{ext}"
-
     return FileResponse(str(resolved), media_type=media_type, filename=filename)
