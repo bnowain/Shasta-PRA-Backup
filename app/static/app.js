@@ -144,6 +144,7 @@ function buildNav() {
         <nav>
             <a href="/">Dashboard</a>
             <a href="/requests">Requests</a>
+            <a href="/documents">Documents</a>
             <a href="/departments">Departments</a>
             <a href="/search">Search</a>
             <a href="/analytics">Analytics</a>

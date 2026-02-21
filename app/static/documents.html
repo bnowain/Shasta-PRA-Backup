@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Shasta PRA — Requests</title>
+    <title>Shasta PRA — Documents</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -20,24 +20,16 @@
     </div>
 
     <div class="container">
-        <h1 class="page-title">Public Records Requests</h1>
+        <h1 class="page-title">Documents</h1>
 
         <div class="filters" id="filter-bar">
             <div class="filter-group">
                 <label>Search</label>
-                <input type="text" id="f-query" placeholder="Keyword or ID...">
+                <input type="text" id="f-query" placeholder="Document title...">
             </div>
             <div class="filter-group">
-                <label>Status</label>
-                <select id="f-status"><option value="">All</option></select>
-            </div>
-            <div class="filter-group">
-                <label>Department</label>
-                <select id="f-dept"><option value="">All</option></select>
-            </div>
-            <div class="filter-group">
-                <label>POC</label>
-                <input type="text" id="f-poc" placeholder="Point of contact...">
+                <label>File Type</label>
+                <select id="f-ext"><option value="">All</option></select>
             </div>
             <div class="filter-group">
                 <label>From</label>
@@ -52,7 +44,8 @@
                 <select id="f-sort">
                     <option value="newest">Newest</option>
                     <option value="oldest">Oldest</option>
-                    <option value="id">ID</option>
+                    <option value="title">Title A-Z</option>
+                    <option value="size">Largest</option>
                 </select>
             </div>
             <button class="btn btn-primary" id="btn-filter">Filter</button>
@@ -64,16 +57,22 @@
         <div class="table-wrap">
             <table>
                 <thead><tr>
-                    <th>ID</th><th>Status</th><th>Request</th><th>Department</th><th>POC</th><th>Date</th><th>Docs</th>
+                    <th>Title</th><th>Type</th><th>Size</th><th>Request</th><th>Date</th><th>Status</th><th></th>
                 </tr></thead>
-                <tbody id="req-table"></tbody>
+                <tbody id="doc-table"></tbody>
             </table>
         </div>
 
         <div class="pagination" id="pagination"></div>
     </div>
 
+    <div class="lightbox-overlay" id="lightbox">
+        <span class="lightbox-close" id="lb-close">&times;</span>
+        <div class="lightbox-content" id="lb-content"></div>
+    </div>
+
     <script src="/static/app.js"></script>
-    <script src="/static/requests.js"></script>
+    <script src="/static/lightbox.js"></script>
+    <script src="/static/documents.js"></script>
 </body>
 </html>

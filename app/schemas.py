@@ -26,6 +26,7 @@ class TimelineEventOut(BaseModel):
     timeline_display_text: Optional[str] = None
     timeline_byline: Optional[str] = None
     timeline_icon_class: Optional[str] = None
+    request_pretty_id: Optional[str] = None
 
 
 class DocumentOut(BaseModel):
@@ -37,6 +38,7 @@ class DocumentOut(BaseModel):
     downloaded: int = 0
     local_path: Optional[str] = None
     asset_url: Optional[str] = None
+    request_pretty_id: Optional[str] = None
 
 
 class RequestDetail(BaseModel):

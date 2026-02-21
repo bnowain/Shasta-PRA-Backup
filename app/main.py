@@ -47,6 +47,11 @@ def request_detail_page(pretty_id: str):
     return FileResponse(str(_static_dir / "request.html"))
 
 
+@app.get("/documents", include_in_schema=False)
+def documents_page():
+    return FileResponse(str(_static_dir / "documents.html"))
+
+
 @app.get("/departments", include_in_schema=False)
 def departments_page():
     return FileResponse(str(_static_dir / "departments.html"))

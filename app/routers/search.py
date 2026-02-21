@@ -36,7 +36,7 @@ def search_all(
     # Search timeline events
     tl_rows = conn.execute(text("""
         SELECT timeline_id, timeline_name, timeline_display_text,
-               timeline_byline, timeline_icon_class
+               timeline_byline, timeline_icon_class, request_pretty_id
         FROM timeline_events
         WHERE timeline_display_text LIKE :q OR timeline_byline LIKE :q
         LIMIT :limit
@@ -45,7 +45,7 @@ def search_all(
     # Search documents
     doc_rows = conn.execute(text("""
         SELECT id, title, file_extension, file_size_mb, upload_date,
-               downloaded, local_path, asset_url
+               downloaded, local_path, asset_url, request_pretty_id
         FROM documents
         WHERE title LIKE :q
         LIMIT :limit
