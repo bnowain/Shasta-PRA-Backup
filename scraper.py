@@ -40,6 +40,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 import hashlib
 from datetime import datetime
@@ -48,6 +49,11 @@ from pathlib import Path
 import requests as http_requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+
+# Fix Windows console encoding (cp1252 can't handle emoji in print statements)
+if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 

@@ -341,6 +341,32 @@ tbody tr { cursor: pointer; }
 .lb-actions { display: flex; gap: .5rem; flex-shrink: 0; }
 .btn-sm { padding: .3rem .6rem; font-size: .78rem; }
 .lb-pdf { width: 85vw; height: calc(85vh - 48px); border: none; }
+/* Lightbox — prev/next navigation arrows */
+.lb-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 48px;
+    height: 80px;
+    background: rgba(0,0,0,.5);
+    border: 1px solid rgba(255,255,255,.1);
+    color: #fff;
+    font-size: 2.2rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1002;
+    transition: background .15s;
+    border-radius: var(--radius);
+    line-height: 1;
+    padding: 0;
+}
+.lb-nav:hover { background: rgba(108,140,255,.5); }
+.lb-nav-prev { left: 1rem; }
+.lb-nav-next { right: 1rem; }
+.lb-nav-info { font-size: .75rem; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+
 .lb-fallback { padding: 3rem; text-align: center; color: var(--text-dim); }
 .lb-loading {
     display: flex; flex-direction: column; align-items: center; justify-content: center;

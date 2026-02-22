@@ -95,6 +95,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Store document data for lightbox
         window._docs = {};
         req.documents.forEach(d => { window._docs[d.id] = d; });
+        window._docList = req.documents.filter(d => d.downloaded);
 
     } catch (err) {
         container.innerHTML = `<div class="error">Failed to load request: ${escapeHtml(err.message)}</div>`;
@@ -103,7 +104,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function handleDocClick(docId, downloaded, assetUrl) {
     if (downloaded && window._docs[docId]) {
-        openLightbox(window._docs[docId]);
+        openLightboxWithNav(window._docs[docId], window._docList || []);
     } else if (assetUrl) {
         window.open(assetUrl.startsWith('//') ? 'https:' + assetUrl : assetUrl, '_blank');
     }

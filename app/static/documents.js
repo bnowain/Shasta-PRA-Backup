@@ -54,6 +54,7 @@ async function loadDocuments() {
         // Store docs for lightbox
         window._docs = {};
         data.results.forEach(d => { window._docs[d.id] = d; });
+        window._docList = data.results.filter(d => d.downloaded);
 
         if (data.results.length === 0) {
             tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:2rem;color:var(--text-dim)">No documents found</td></tr>';
@@ -81,7 +82,7 @@ async function loadDocuments() {
 
 function handleDocRowClick(docId, downloaded, assetUrl) {
     if (downloaded && window._docs[docId]) {
-        openLightbox(window._docs[docId]);
+        openLightboxWithNav(window._docs[docId], window._docList || []);
     } else if (assetUrl) {
         window.open(assetUrl.startsWith('//') ? 'https:' + assetUrl : assetUrl, '_blank');
     }

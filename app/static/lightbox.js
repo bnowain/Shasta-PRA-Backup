@@ -3,6 +3,10 @@
 
 const _MEDIA_EXTENSIONS = ['mp4','webm','mov','avi','mkv','mp3','m4a','wav','ogg','flac'];
 
+/* Navigation state */
+let _docList = [];
+let _docIndex = -1;
+
 function _transcriptPanel(docId) {
     return `<div class="lb-transcript-panel" id="lb-transcript-panel">
         <div class="lb-transcript-actions" id="lb-transcript-actions">
@@ -105,6 +109,33 @@ async function triggerTranscribe(docId) {
 }
 
 
+function openLightboxWithNav(doc, docList) {
+    _docList = docList || [];
+    _docIndex = _docList.findIndex(d => d.id === doc.id);
+    openLightbox(doc);
+}
+
+function navLightbox(delta) {
+    const newIndex = _docIndex + delta;
+    if (newIndex < 0 || newIndex >= _docList.length) return;
+    _docIndex = newIndex;
+    openLightbox(_docList[_docIndex]);
+}
+
+function _updateNavArrows() {
+    const prev = document.getElementById('lb-prev');
+    const next = document.getElementById('lb-next');
+    if (!prev || !next) return;
+
+    if (_docList.length <= 1) {
+        prev.style.display = 'none';
+        next.style.display = 'none';
+        return;
+    }
+    prev.style.display = _docIndex > 0 ? '' : 'none';
+    next.style.display = _docIndex < _docList.length - 1 ? '' : 'none';
+}
+
 function openLightbox(doc) {
     const overlay = document.getElementById('lightbox');
     const content = document.getElementById('lb-content');
@@ -114,11 +145,13 @@ function openLightbox(doc) {
     const fileUrl = `/api/documents/${doc.id}/file`;
     const title = escapeHtml(doc.title || 'Document');
     const isMedia = _MEDIA_EXTENSIONS.includes(ext);
+    const navInfo = _docList.length > 1 ? `<span class="lb-nav-info">${_docIndex + 1} / ${_docList.length}</span>` : '';
 
     // Toolbar always shown
     const toolbar = `
         <div class="lb-toolbar">
             <span class="lb-title" title="${title}">${title}</span>
+            ${navInfo}
             <div class="lb-actions">
                 <a href="${previewUrl}" target="_blank" class="btn btn-secondary btn-sm">Open in new tab</a>
                 <a href="${fileUrl}" download class="btn btn-primary btn-sm">Download original</a>
@@ -170,6 +203,7 @@ function openLightbox(doc) {
 
     content.innerHTML = toolbar + body;
     overlay.classList.add('active');
+    _updateNavArrows();
 }
 
 function closeLightbox() {
@@ -177,14 +211,40 @@ function closeLightbox() {
     const content = document.getElementById('lb-content');
     overlay.classList.remove('active');
     content.innerHTML = '';
+    _docList = [];
+    _docIndex = -1;
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    const overlay = document.getElementById('lightbox');
+
+    // Create nav arrows dynamically
+    const prevBtn = document.createElement('button');
+    prevBtn.id = 'lb-prev';
+    prevBtn.className = 'lb-nav lb-nav-prev';
+    prevBtn.innerHTML = '&#x2039;';
+    prevBtn.title = 'Previous document (Left arrow)';
+    prevBtn.style.display = 'none';
+    prevBtn.addEventListener('click', e => { e.stopPropagation(); navLightbox(-1); });
+    overlay.appendChild(prevBtn);
+
+    const nextBtn = document.createElement('button');
+    nextBtn.id = 'lb-next';
+    nextBtn.className = 'lb-nav lb-nav-next';
+    nextBtn.innerHTML = '&#x203a;';
+    nextBtn.title = 'Next document (Right arrow)';
+    nextBtn.style.display = 'none';
+    nextBtn.addEventListener('click', e => { e.stopPropagation(); navLightbox(1); });
+    overlay.appendChild(nextBtn);
+
     document.getElementById('lb-close').addEventListener('click', closeLightbox);
-    document.getElementById('lightbox').addEventListener('click', e => {
+    overlay.addEventListener('click', e => {
         if (e.target === e.currentTarget) closeLightbox();
     });
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeLightbox();
+        if (!overlay.classList.contains('active')) return;
+        if (e.key === 'ArrowLeft') navLightbox(-1);
+        if (e.key === 'ArrowRight') navLightbox(1);
     });
 });
