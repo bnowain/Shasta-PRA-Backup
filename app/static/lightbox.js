@@ -188,7 +188,7 @@ async function _loadEmail(docId) {
         html += '</div>';
 
         if (data.body_html) {
-            html += `<iframe class="lb-email-body" sandbox="allow-same-origin" srcdoc="${escapeHtml(data.body_html)}"></iframe>`;
+            html += '<iframe class="lb-email-body" sandbox="allow-same-origin"></iframe>';
         } else if (data.body_text) {
             html += `<pre class="lb-email-text">${escapeHtml(data.body_text)}</pre>`;
         } else {
@@ -196,6 +196,12 @@ async function _loadEmail(docId) {
         }
 
         container.innerHTML = html;
+
+        // Set srcdoc via DOM to avoid quote-escaping issues in template literals
+        if (data.body_html) {
+            const iframe = container.querySelector('.lb-email-body');
+            if (iframe) iframe.srcdoc = data.body_html;
+        }
     } catch (err) {
         container.innerHTML = `<div class="lb-fallback">
             <p>Failed to load email: ${escapeHtml(err.message)}</p>
@@ -217,7 +223,9 @@ async function _loadTextFile(docId, ext) {
         const text = await resp.text();
 
         if (ext === 'html') {
-            container.innerHTML = `<iframe class="lb-text-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(text)}"></iframe>`;
+            container.innerHTML = '<iframe class="lb-text-iframe" sandbox="allow-same-origin"></iframe>';
+            const iframe = container.querySelector('.lb-text-iframe');
+            if (iframe) iframe.srcdoc = text;
         } else {
             container.innerHTML = `<pre class="lb-text-pre">${escapeHtml(text)}</pre>`;
         }
@@ -268,13 +276,22 @@ function openLightbox(doc) {
     const isMedia = _MEDIA_EXTENSIONS.includes(ext);
     const navInfo = _docList.length > 1 ? `<span class="lb-nav-info">${_docIndex + 1} / ${_docList.length}</span>` : '';
 
+    // "Save as PDF" for types that support conversion
+    const _OFFICE_EXTS = ['docx','doc','pptx','ppt','odt','ods','odp','rtf'];
+    let savePdfBtn = '';
+    if (ext === 'msg') {
+        savePdfBtn = `<a href="/api/documents/${doc.id}/email/pdf" download class="btn btn-secondary btn-sm">Save as PDF</a>`;
+    } else if (_OFFICE_EXTS.includes(ext)) {
+        savePdfBtn = `<a href="${previewUrl}" download class="btn btn-secondary btn-sm">Save as PDF</a>`;
+    }
+
     // Toolbar always shown
     const toolbar = `
         <div class="lb-toolbar">
             <span class="lb-title" title="${title}">${title}</span>
             ${navInfo}
             <div class="lb-actions">
-                <a href="${previewUrl}" target="_blank" class="btn btn-secondary btn-sm">Open in new tab</a>
+                ${savePdfBtn}
                 <a href="${fileUrl}" download class="btn btn-primary btn-sm">Download original</a>
             </div>
         </div>`;

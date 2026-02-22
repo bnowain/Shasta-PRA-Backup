@@ -519,3 +519,115 @@ def get_email(doc_id: int, conn: Connection = Depends(get_db)):
         raise HTTPException(501, "extract-msg not installed. Run: pip install extract-msg>=0.48")
     except Exception as e:
         raise HTTPException(500, f"Failed to parse .msg file: {e}")
+
+
+@router.get("/{doc_id}/email/pdf")
+def get_email_pdf(doc_id: int, conn: Connection = Depends(get_db)):
+    """Convert a .msg email to PDF via LibreOffice (generated on the fly)."""
+    import html as html_mod
+    import re as re_mod
+
+    row = conn.execute(
+        text("SELECT id, title, local_path, file_extension, downloaded FROM documents WHERE id = :did"),
+        {"did": doc_id},
+    ).mappings().first()
+
+    if not row:
+        raise HTTPException(404, "Document not found")
+
+    doc = dict(row)
+    ext = (doc.get("file_extension") or "").lower()
+    if ext != "msg":
+        raise HTTPException(400, f".{ext} is not an email file")
+
+    resolved = _resolve_doc_path(doc)
+
+    # Parse email
+    try:
+        import extract_msg
+        msg = extract_msg.Message(str(resolved))
+        sender = msg.sender or ""
+        to = msg.to or ""
+        cc = msg.cc or ""
+        subject = msg.subject or ""
+        date = str(msg.date) if msg.date else ""
+        body_html = msg.htmlBody.decode("utf-8", errors="replace") if isinstance(msg.htmlBody, bytes) else (msg.htmlBody or "")
+        body_text = msg.body or ""
+        msg.close()
+    except ImportError:
+        raise HTTPException(501, "extract-msg not installed")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to parse .msg: {e}")
+
+    # Build email header block — dark banner with white text
+    headers_html = ""
+    for label, value in [("From", sender), ("To", to), ("CC", cc), ("Date", date), ("Subject", subject)]:
+        if value:
+            headers_html += (
+                f'<div style="margin:0;padding:0;line-height:1.2;font-size:10pt">'
+                f'<span style="font-weight:bold;color:#aaa;display:inline-block;'
+                f'width:55px;text-align:right;margin-right:8px">{label}:</span>'
+                f'<span style="color:#fff">{html_mod.escape(value)}</span></div>'
+            )
+    header_block = (
+        f'<div style="background:#1a1d27;color:#fff;padding:12px 16px;'
+        f'margin:-54px -54px 16px -54px;font-family:Calibri,Arial,sans-serif">'
+        f'{headers_html}</div>'
+    )
+
+    # Clean Outlook Word HTML for reliable LibreOffice rendering
+    if body_html:
+        body_match = re_mod.search(r'<body[^>]*>(.*)</body>', body_html, re_mod.DOTALL)
+        email_body = body_match.group(1) if body_match else body_html
+
+        # Convert <p> to <div> — LibreOffice adds unwanted spacing to <p> tags
+        email_body = re_mod.sub(r'<p\b([^>]*)>', r'<div\1>', email_body)
+        email_body = email_body.replace('</p>', '</div>')
+
+        # Strip Office namespace tags and empty markers
+        email_body = re_mod.sub(r'</?o:p>', '', email_body)
+
+        # Strip mso-* CSS properties but keep real ones (font-size, font-family, color, etc.)
+        def _clean_style(m):
+            style = m.group(1)
+            props = [p.strip() for p in style.split(';') if p.strip()]
+            cleaned = [p for p in props if not p.strip().startswith('mso-')]
+            if not cleaned:
+                return ""
+            return 'style="' + ';'.join(cleaned) + '"'
+        email_body = re_mod.sub(r"""style=["']([^"']*)["']""", _clean_style, email_body)
+    else:
+        # Fallback to plain text
+        clean_text = re_mod.sub(r'(\r?\n[ \t]*){3,}', '\n\n', body_text)
+        email_body = f"<div style='white-space:pre-wrap'>{html_mod.escape(clean_text)}</div>"
+
+    full_html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+@page {{ size: letter; margin: 0.75in; }}
+body {{ font-family: Calibri, Arial, sans-serif; font-size: 11pt;
+        margin: 0; padding: 0; line-height: 1.3; }}
+div {{ margin: 0; padding: 0; }}
+b {{ font-weight: bold; }}
+</style>
+</head><body>{header_block}{email_body}</body></html>"""
+
+    # Write temp HTML and convert to PDF
+    with tempfile.NamedTemporaryFile(suffix=".html", delete=False, mode="w", encoding="utf-8") as f:
+        f.write(full_html)
+        tmp_html = Path(f.name)
+
+    try:
+        tmp_pdf = tmp_html.with_suffix(".pdf")
+        ok = convert_to_pdf(tmp_html, tmp_pdf)
+        if not ok:
+            raise HTTPException(500, "LibreOffice conversion failed")
+
+        filename = (doc.get("title") or f"document_{doc_id}").rsplit(".", 1)[0] + ".pdf"
+        return FileResponse(str(tmp_pdf), media_type="application/pdf", filename=filename)
+    except FileNotFoundError:
+        raise HTTPException(501, "LibreOffice not installed")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(504, "Conversion timed out")
+    finally:
+        tmp_html.unlink(missing_ok=True)

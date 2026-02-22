@@ -476,9 +476,9 @@ tbody tr { cursor: pointer; }
 
 /* ── Lightbox — email viewer ─────────────────────────────────────────────── */
 .lb-email {
-    width: 85vw;
-    max-height: calc(85vh - 48px);
-    overflow: auto;
+    width: 70vw;
+    height: calc(85vh - 48px);
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -504,7 +504,7 @@ tbody tr { cursor: pointer; }
 .lb-email-value { color: var(--text); word-break: break-word; }
 .lb-email-body {
     flex: 1;
-    min-height: 300px;
+    min-height: 0;
     border: none;
     background: #fff;
 }
