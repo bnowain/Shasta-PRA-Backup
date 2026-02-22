@@ -26,3 +26,8 @@ _SOFFICE_CANDIDATES = [
 ]
 SOFFICE_PATH = next((str(p) for p in _SOFFICE_CANDIDATES if p.exists()), None) or shutil.which("soffice") or "soffice"
 CONVERTIBLE_EXTENSIONS = {"docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf"}
+
+# Text extraction (OCR Phase 1: native text only, no OCR)
+TEXT_EXTRACTABLE_EXTENSIONS = {"pdf"}
+DIRECT_READ_EXTENSIONS = {"txt", "csv"}
+OCR_MAX_FILE_SIZE_MB = 200

@@ -12,7 +12,9 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from app.config import BASE_DIR, DOCS_DIR, SOFFICE_PATH, CONVERTIBLE_EXTENSIONS, TRANSCRIBABLE_EXTENSIONS
+from app.config import (BASE_DIR, DOCS_DIR, SOFFICE_PATH, CONVERTIBLE_EXTENSIONS,
+                        TRANSCRIBABLE_EXTENSIONS, TEXT_EXTRACTABLE_EXTENSIONS,
+                        DIRECT_READ_EXTENSIONS)
 from app.database import get_db
 from app import schemas
 
@@ -173,6 +175,50 @@ def list_extensions(conn: Connection = Depends(get_db)):
         ORDER BY cnt DESC
     """)).mappings().all()
     return [{"ext": r["ext"], "count": r["cnt"]} for r in rows]
+
+
+# ── Text extraction status ────────────────────────────────────────────────────
+
+@router.get("/text-extraction-status", response_model=schemas.TextExtractionStatus)
+def text_extraction_status(conn: Connection = Depends(get_db)):
+    all_exts = TEXT_EXTRACTABLE_EXTENSIONS | DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
+    ext_list = ",".join(f"'{e}'" for e in all_exts)
+
+    total = conn.execute(text(f"""
+        SELECT COUNT(*) FROM documents
+        WHERE downloaded = 1 AND local_path IS NOT NULL
+          AND LOWER(file_extension) IN ({ext_list})
+    """)).scalar()
+
+    extracted = conn.execute(text(f"""
+        SELECT COUNT(DISTINCT dt.document_id) FROM document_text dt
+        JOIN documents d ON d.id = dt.document_id
+        WHERE dt.method IN ('pymupdf', 'direct_read')
+          AND LOWER(d.file_extension) IN ({ext_list})
+    """)).scalar()
+
+    failed = conn.execute(text(f"""
+        SELECT COUNT(DISTINCT pl.document_id) FROM processing_log pl
+        JOIN documents d ON d.id = pl.document_id
+        WHERE pl.operation = 'text_extract' AND pl.status = 'failed'
+          AND LOWER(d.file_extension) IN ({ext_list})
+          AND pl.document_id NOT IN (
+              SELECT document_id FROM document_text WHERE method IN ('pymupdf', 'direct_read')
+          )
+    """)).scalar()
+
+    total_pages = conn.execute(text("""
+        SELECT COUNT(*) FROM document_text
+        WHERE method IN ('pymupdf', 'direct_read')
+    """)).scalar()
+
+    return schemas.TextExtractionStatus(
+        total_extractable=total,
+        extracted=extracted,
+        pending=total - extracted - failed,
+        failed=failed,
+        total_pages=total_pages,
+    )
 
 
 # ── Transcription status ──────────────────────────────────────────────────────
@@ -362,4 +408,71 @@ def transcribe_document_endpoint(doc_id: int, conn: Connection = Depends(get_db)
         "segment_count": result["segment_count"],
         "duration_seconds": result["duration"],
         "text_preview": result["text"][:200] + "..." if len(result["text"]) > 200 else result["text"],
+    }
+
+
+# ── Text extraction endpoints ───────────────────────────────────────────────
+
+@router.get("/{doc_id}/extracted-text", response_model=schemas.ExtractedTextResult)
+def get_extracted_text(doc_id: int, conn: Connection = Depends(get_db)):
+    rows = conn.execute(text(
+        "SELECT document_id, page_number, text_content, method, created_at "
+        "FROM document_text WHERE document_id = :did AND method IN ('pymupdf', 'direct_read') "
+        "ORDER BY page_number"
+    ), {"did": doc_id}).mappings().all()
+
+    if not rows:
+        raise HTTPException(404, "No extracted text found for this document")
+
+    pages = [schemas.ExtractedTextPage(
+        page_number=r["page_number"],
+        text=r["text_content"],
+        method=r["method"],
+    ) for r in rows]
+
+    total_chars = sum(len(p.text) for p in pages)
+    first = dict(rows[0])
+
+    return schemas.ExtractedTextResult(
+        document_id=doc_id,
+        pages=pages,
+        total_pages=len(pages),
+        total_chars=total_chars,
+        method=first["method"],
+        created_at=first.get("created_at"),
+    )
+
+
+@router.post("/{doc_id}/extract-text")
+def extract_text_endpoint(doc_id: int, conn: Connection = Depends(get_db)):
+    from app.services.ocr import extract_text_from_document
+
+    row = conn.execute(text(
+        "SELECT id, title, file_extension, local_path, downloaded FROM documents WHERE id = :did"
+    ), {"did": doc_id}).mappings().first()
+
+    if not row:
+        raise HTTPException(404, "Document not found")
+
+    doc = dict(row)
+    ext = (doc.get("file_extension") or "").lower()
+
+    all_exts = TEXT_EXTRACTABLE_EXTENSIONS | DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
+    if ext not in all_exts:
+        raise HTTPException(400, f".{ext} files are not supported for text extraction")
+
+    if not doc["downloaded"] or not doc["local_path"]:
+        raise HTTPException(404, "Document file not available (metadata only)")
+
+    result = extract_text_from_document(
+        conn, doc["id"], doc["local_path"], ext, doc.get("title", ""))
+
+    if not result["success"]:
+        raise HTTPException(500, f"Text extraction failed: {result['error']}")
+
+    return {
+        "success": True,
+        "document_id": doc_id,
+        "page_count": result["page_count"],
+        "char_count": result["char_count"],
     }

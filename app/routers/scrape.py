@@ -259,12 +259,12 @@ def _worker(q):
             untranscribed = get_untranscribed_documents(conn)
             tr_total = len(untranscribed)
             if tr_total == 0:
-                _send(q, "transcribing", "No audio/video files to transcribe", 99)
+                _send(q, "transcribing", "No audio/video files to transcribe", 97)
             else:
-                _send(q, "transcribing", f"Transcribing {tr_total} audio/video files...", 96)
+                _send(q, "transcribing", f"Transcribing {tr_total} audio/video files...", 95)
                 tr_ok = tr_fail = 0
                 for k, doc in enumerate(untranscribed):
-                    progress = 96 + int(((k + 1) / tr_total) * 3)  # 96→99
+                    progress = 95 + int(((k + 1) / tr_total) * 2)  # 95→97
                     doc_label = doc['title'] or f"doc {doc['id']}"
                     _send(q, "transcribing",
                           f"Transcribing {doc_label} ({k+1}/{tr_total})...",
@@ -279,9 +279,42 @@ def _worker(q):
                 parts_tr = [f"{tr_ok} transcribed"]
                 if tr_fail:
                     parts_tr.append(f"{tr_fail} failed")
-                _send(q, "transcribing_done", f"Transcriptions: {', '.join(parts_tr)}", 99)
+                _send(q, "transcribing_done", f"Transcriptions: {', '.join(parts_tr)}", 97)
         else:
-            _send(q, "transcribing", "Skipping transcription (civic_media not running)", 99)
+            _send(q, "transcribing", "Skipping transcription (civic_media not running)", 97)
+
+        # ── Phase 7: Extract text from documents ─────────────────────
+        from app.services.ocr import extract_text_from_document, get_unprocessed_documents
+
+        unprocessed = get_unprocessed_documents(conn)
+        te_total = len(unprocessed)
+        if te_total == 0:
+            _send(q, "text_extract", "No documents need text extraction", 99)
+        else:
+            _send(q, "text_extract", f"Extracting text from {te_total} documents...", 97)
+            te_ok = te_empty = te_fail = 0
+            for k, doc in enumerate(unprocessed):
+                progress = 97 + int(((k + 1) / te_total) * 2)  # 97→99
+                doc_label = doc['title'] or f"doc {doc['id']}"
+                _send(q, "text_extract",
+                      f"Extracting text: {doc_label} ({k+1}/{te_total})...",
+                      progress, current=k + 1, total=te_total)
+                result = extract_text_from_document(
+                    conn, doc["id"], doc["local_path"],
+                    doc["file_extension"], doc.get("title", ""))
+                if result["success"]:
+                    if result["char_count"] > 0:
+                        te_ok += 1
+                    else:
+                        te_empty += 1
+                else:
+                    te_fail += 1
+            parts_te = [f"{te_ok} extracted"]
+            if te_empty:
+                parts_te.append(f"{te_empty} empty")
+            if te_fail:
+                parts_te.append(f"{te_fail} failed")
+            _send(q, "text_extract_done", f"Text extraction: {', '.join(parts_te)}", 99)
 
         # ── Done ─────────────────────────────────────────────────────
         final_req = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]

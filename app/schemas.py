@@ -128,3 +128,28 @@ class TranscriptionStatus(BaseModel):
     transcribed: int = 0
     pending: int = 0
     failed: int = 0
+
+
+# ── Text extraction models ──────────────────────────────────────────────────
+
+class ExtractedTextPage(BaseModel):
+    page_number: int
+    text: str
+    method: str
+
+
+class ExtractedTextResult(BaseModel):
+    document_id: int
+    pages: list[ExtractedTextPage] = []
+    total_pages: int = 0
+    total_chars: int = 0
+    method: str = ""
+    created_at: Optional[str] = None
+
+
+class TextExtractionStatus(BaseModel):
+    total_extractable: int = 0
+    extracted: int = 0
+    pending: int = 0
+    failed: int = 0
+    total_pages: int = 0

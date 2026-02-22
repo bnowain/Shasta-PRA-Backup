@@ -17,9 +17,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function stripHtml(str) {
     if (!str) return '';
+    // Replace <br> and block tags with spaces so words don't smush together
+    let s = str.replace(/<br\s*\/?>/gi, ' ').replace(/<\/(p|div|li|tr|td|th)>/gi, ' ');
     const tmp = document.createElement('div');
-    tmp.innerHTML = str;
-    return tmp.textContent || tmp.innerText || '';
+    tmp.innerHTML = s;
+    return (tmp.textContent || tmp.innerText || '').replace(/\s+/g, ' ').trim();
 }
 
 async function doSearch() {
@@ -55,16 +57,36 @@ async function doSearch() {
             html += `<div class="result-group">
                 <h3>Timeline Events (${data.timeline_events.length})</h3>
                 ${data.timeline_events.map(t => {
-                    const cleanText = stripHtml(t.timeline_display_text || '');
+                    const rawText = t.timeline_display_text || '';
                     const cleanByline = stripHtml(t.timeline_byline || '');
                     const linkHref = t.request_pretty_id ? `/requests/${encodeURIComponent(t.request_pretty_id)}` : null;
+
+                    // Detect document lists (br-separated filenames)
+                    const isDocList = rawText.includes('<br>') && /\.\w{2,5}(<br|\s*$)/i.test(rawText);
+                    let bodyHtml;
+                    if (isDocList) {
+                        const names = rawText.split(/<br\s*\/?>/gi).map(n => n.replace(/<[^>]*>/g, '').trim()).filter(Boolean);
+                        const MAX_BUBBLES = 20;
+                        const shown = names.slice(0, MAX_BUBBLES);
+                        const remaining = names.length - shown.length;
+                        bodyHtml = '<div class="doc-bubble-wrap">' +
+                            shown.map(n => `<span class="doc-bubble">${highlight(n, q)}</span>`).join('') +
+                            (remaining > 0 ? `<a class="doc-bubble-more" ${linkHref ? `href="${linkHref}"` : ''} onclick="event.stopPropagation()">View all</a>` : '') +
+                            '</div>';
+                    } else {
+                        const cleanText = stripHtml(rawText);
+                        const truncText = cleanText.length > 300 ? cleanText.slice(0, 300) + '...' : cleanText;
+                        bodyHtml = `<div style="font-size:.87rem">${highlight(truncText, q)}</div>`;
+                    }
+
                     return `
-                    <div class="result-item${linkHref ? '' : ''}" ${linkHref ? `onclick="location.href='${linkHref}'" style="cursor:pointer"` : ''}>
+                    <div class="result-item" ${linkHref ? `onclick="location.href='${linkHref}'" style="cursor:pointer"` : ''}>
                         <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.3rem">
                             ${t.request_pretty_id ? `<span class="pill pill-blue">${escapeHtml(t.request_pretty_id)}</span>` : ''}
-                            <span style="font-size:.87rem">${highlight(cleanText, q)}</span>
+                            ${t.timeline_name ? `<span style="font-size:.78rem;font-weight:600;color:var(--text-dim)">${escapeHtml(t.timeline_name)}</span>` : ''}
                         </div>
-                        ${cleanByline ? `<div style="font-size:.78rem;color:var(--text-dim);margin-top:.2rem">${highlight(cleanByline, q)}</div>` : ''}
+                        ${bodyHtml}
+                        ${cleanByline ? `<div style="font-size:.78rem;color:var(--text-dim);margin-top:.3rem">${highlight(cleanByline, q)}</div>` : ''}
                     </div>`;
                 }).join('')}
             </div>`;
