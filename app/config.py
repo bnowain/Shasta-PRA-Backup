@@ -25,7 +25,7 @@ _SOFFICE_CANDIDATES = [
     Path("C:/Program Files/LibreOffice/program/soffice.exe"),
 ]
 SOFFICE_PATH = next((str(p) for p in _SOFFICE_CANDIDATES if p.exists()), None) or shutil.which("soffice") or "soffice"
-CONVERTIBLE_EXTENSIONS = {"docx", "doc", "xlsx", "xls", "pptx", "ppt", "odt", "ods", "odp", "rtf"}
+CONVERTIBLE_EXTENSIONS = {"docx", "doc", "pptx", "ppt", "odt", "ods", "odp", "rtf"}
 
 # Text extraction (OCR Phase 1: native text only, no OCR)
 TEXT_EXTRACTABLE_EXTENSIONS = {"pdf"}

@@ -109,6 +109,127 @@ async function triggerTranscribe(docId) {
 }
 
 
+/* ── Spreadsheet viewer (SheetJS) ────────────────────────────────────────── */
+
+async function _loadSpreadsheet(docId, ext) {
+    const container = document.getElementById('lb-sheet-container');
+    if (!container) return;
+
+    try {
+        const resp = await fetch(`/api/documents/${docId}/file`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const buf = await resp.arrayBuffer();
+        const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+
+        // Build tab bar if multiple sheets
+        let tabsHtml = '';
+        if (wb.SheetNames.length > 1) {
+            tabsHtml = '<div class="lb-sheet-tabs">';
+            wb.SheetNames.forEach((name, i) => {
+                tabsHtml += `<button class="lb-sheet-tab${i === 0 ? ' active' : ''}" onclick="_switchSheet(this, ${i})">${escapeHtml(name)}</button>`;
+            });
+            tabsHtml += '</div>';
+        }
+
+        // Render each sheet as hidden HTML table
+        let sheetsHtml = '';
+        wb.SheetNames.forEach((name, i) => {
+            const ws = wb.Sheets[name];
+            const html = XLSX.utils.sheet_to_html(ws, { editable: false });
+            sheetsHtml += `<div class="lb-sheet-content" data-sheet="${i}" style="${i === 0 ? '' : 'display:none'}">${html}</div>`;
+        });
+
+        container.innerHTML = tabsHtml + sheetsHtml;
+    } catch (err) {
+        container.innerHTML = `<div class="lb-fallback">
+            <p>Failed to load spreadsheet: ${escapeHtml(err.message)}</p>
+            <a href="/api/documents/${docId}/file" download class="btn btn-primary">Download File</a>
+        </div>`;
+    }
+}
+
+function _switchSheet(btn, index) {
+    const container = btn.closest('.lb-spreadsheet');
+    if (!container) return;
+
+    container.querySelectorAll('.lb-sheet-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+
+    container.querySelectorAll('.lb-sheet-content').forEach(s => {
+        s.style.display = parseInt(s.dataset.sheet) === index ? '' : 'none';
+    });
+}
+
+/* ── Email viewer (.msg) ────────────────────────────────────────────────── */
+
+async function _loadEmail(docId) {
+    const container = document.getElementById('lb-email-container');
+    if (!container) return;
+
+    try {
+        const resp = await fetch(`/api/documents/${docId}/email`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const data = await resp.json();
+
+        const headers = [
+            ['From', data.sender],
+            ['To', data.to],
+            ['CC', data.cc],
+            ['Date', data.date],
+            ['Subject', data.subject],
+        ].filter(([, v]) => v);
+
+        let html = '<div class="lb-email-headers">';
+        for (const [label, value] of headers) {
+            html += `<div class="lb-email-row"><span class="lb-email-label">${label}</span><span class="lb-email-value">${escapeHtml(value)}</span></div>`;
+        }
+        html += '</div>';
+
+        if (data.body_html) {
+            html += `<iframe class="lb-email-body" sandbox="allow-same-origin" srcdoc="${escapeHtml(data.body_html)}"></iframe>`;
+        } else if (data.body_text) {
+            html += `<pre class="lb-email-text">${escapeHtml(data.body_text)}</pre>`;
+        } else {
+            html += '<p style="padding:1rem;color:var(--text-dim)">No message body</p>';
+        }
+
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = `<div class="lb-fallback">
+            <p>Failed to load email: ${escapeHtml(err.message)}</p>
+            <a href="/api/documents/${docId}/file" download class="btn btn-primary">Download File</a>
+        </div>`;
+    }
+}
+
+/* ── Text / HTML file viewer ────────────────────────────────────────────── */
+
+async function _loadTextFile(docId, ext) {
+    const container = document.getElementById('lb-text-container');
+    if (!container) return;
+
+    try {
+        const resp = await fetch(`/api/documents/${docId}/file`);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+        const text = await resp.text();
+
+        if (ext === 'html') {
+            container.innerHTML = `<iframe class="lb-text-iframe" sandbox="allow-same-origin" srcdoc="${escapeHtml(text)}"></iframe>`;
+        } else {
+            container.innerHTML = `<pre class="lb-text-pre">${escapeHtml(text)}</pre>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="lb-fallback">
+            <p>Failed to load file: ${escapeHtml(err.message)}</p>
+            <a href="/api/documents/${docId}/file" download class="btn btn-primary">Download File</a>
+        </div>`;
+    }
+}
+
+
 function openLightboxWithNav(doc, docList) {
     _docList = docList || [];
     _docIndex = _docList.findIndex(d => d.id === doc.id);
@@ -179,7 +300,34 @@ function openLightbox(doc) {
             <audio controls autoplay><source src="${fileUrl}">Your browser does not support audio.</audio>
         </div>`;
         body += _transcriptPanel(doc.id);
-    } else if (['docx','doc','xlsx','xls','pptx','ppt','odt','ods','odp','rtf'].includes(ext)) {
+    } else if (['xlsx','xls','csv'].includes(ext)) {
+        // Spreadsheets — client-side rendering with SheetJS
+        body = `<div class="lb-spreadsheet" id="lb-sheet-container">
+            <div class="lb-loading" id="lb-loading">
+                <div class="lb-spinner"></div>
+                <p>Loading spreadsheet...</p>
+            </div>
+        </div>`;
+        setTimeout(() => _loadSpreadsheet(doc.id, ext), 0);
+    } else if (ext === 'msg') {
+        // Outlook email — parsed server-side with extract-msg
+        body = `<div class="lb-email" id="lb-email-container">
+            <div class="lb-loading" id="lb-loading">
+                <div class="lb-spinner"></div>
+                <p>Loading email...</p>
+            </div>
+        </div>`;
+        setTimeout(() => _loadEmail(doc.id), 0);
+    } else if (['txt','html'].includes(ext)) {
+        // Text / HTML files — inline display
+        body = `<div class="lb-text" id="lb-text-container">
+            <div class="lb-loading" id="lb-loading">
+                <div class="lb-spinner"></div>
+                <p>Loading file...</p>
+            </div>
+        </div>`;
+        setTimeout(() => _loadTextFile(doc.id, ext), 0);
+    } else if (['docx','doc','pptx','ppt','odt','ods','odp','rtf'].includes(ext)) {
         // Office docs — preview endpoint converts to PDF via LibreOffice
         // Show loading indicator while conversion happens
         body = `<div class="lb-loading" id="lb-loading">

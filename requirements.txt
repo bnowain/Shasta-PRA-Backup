@@ -7,3 +7,4 @@ uvicorn[standard]>=0.22
 sqlalchemy>=2.0
 pydantic>=2.0
 PyMuPDF>=1.24
+extract-msg>=0.48

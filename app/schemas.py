@@ -153,3 +153,16 @@ class TextExtractionStatus(BaseModel):
     pending: int = 0
     failed: int = 0
     total_pages: int = 0
+
+
+# ── Email message model ────────────────────────────────────────────────────
+
+class EmailMessage(BaseModel):
+    document_id: int
+    sender: str = ""
+    to: str = ""
+    cc: str = ""
+    subject: str = ""
+    date: str = ""
+    body_html: str = ""
+    body_text: str = ""

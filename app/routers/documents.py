@@ -22,7 +22,8 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 # Types that browsers can display natively
 _INLINE_TYPES = {"pdf", "jpg", "jpeg", "png", "gif", "webp", "bmp",
-                 "mp4", "webm", "mp3", "m4a", "wav", "ogg", "txt", "csv"}
+                 "mp4", "webm", "mp3", "m4a", "wav", "ogg", "txt", "csv",
+                 "html", "msg", "xlsx", "xls"}
 
 _MEDIA_TYPES = {
     "pdf": "application/pdf",
@@ -40,6 +41,8 @@ _MEDIA_TYPES = {
     "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "txt": "text/plain",
     "csv": "text/csv",
+    "html": "text/html",
+    "msg": "application/vnd.ms-outlook",
 }
 
 # Max file size for on-demand conversion (50 MB)
@@ -476,3 +479,43 @@ def extract_text_endpoint(doc_id: int, conn: Connection = Depends(get_db)):
         "page_count": result["page_count"],
         "char_count": result["char_count"],
     }
+
+
+# ── Email (.msg) parsing endpoint ────────────────────────────────────────
+
+@router.get("/{doc_id}/email", response_model=schemas.EmailMessage)
+def get_email(doc_id: int, conn: Connection = Depends(get_db)):
+    row = conn.execute(
+        text("SELECT id, local_path, file_extension, downloaded FROM documents WHERE id = :did"),
+        {"did": doc_id},
+    ).mappings().first()
+
+    if not row:
+        raise HTTPException(404, "Document not found")
+
+    doc = dict(row)
+    ext = (doc.get("file_extension") or "").lower()
+    if ext != "msg":
+        raise HTTPException(400, f".{ext} is not an email file")
+
+    resolved = _resolve_doc_path(doc)
+
+    try:
+        import extract_msg
+        msg = extract_msg.Message(str(resolved))
+        result = schemas.EmailMessage(
+            document_id=doc_id,
+            sender=msg.sender or "",
+            to=msg.to or "",
+            cc=msg.cc or "",
+            subject=msg.subject or "",
+            date=str(msg.date) if msg.date else "",
+            body_html=msg.htmlBody.decode("utf-8", errors="replace") if isinstance(msg.htmlBody, bytes) else (msg.htmlBody or ""),
+            body_text=msg.body or "",
+        )
+        msg.close()
+        return result
+    except ImportError:
+        raise HTTPException(501, "extract-msg not installed. Run: pip install extract-msg>=0.48")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to parse .msg file: {e}")
