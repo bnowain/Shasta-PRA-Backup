@@ -201,6 +201,8 @@ tbody tr { cursor: pointer; }
     margin-bottom: 1.5rem;
     line-height: 1.7;
     text-align: left;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 .request-text-box p,
 .request-text-box div,
@@ -209,6 +211,7 @@ tbody tr { cursor: pointer; }
 .request-text-box th {
     text-align: left !important;
 }
+.request-text-box a { word-break: break-all; }
 .request-text-box p { margin-bottom: .4rem; }
 .request-text-box p:empty { display: none; }
 

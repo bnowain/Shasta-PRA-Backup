@@ -16,6 +16,51 @@ function cleanTimelineHtml(raw) {
         '</ul>';
 }
 
+function cleanRequestHtml(html) {
+    if (!html) return '';
+    const div = document.createElement('div');
+    div.innerHTML = html;
+
+    // Add href to bare <a> tags that contain URL-like text
+    div.querySelectorAll('a:not([href])').forEach(a => {
+        const text = a.textContent.trim();
+        if (/^(https?:\/\/|www\.)/.test(text)) {
+            const url = text.startsWith('www.') ? 'https://' + text : text;
+            a.href = url;
+            a.target = '_blank';
+            a.rel = 'noopener';
+        } else if (/@/.test(text) && !text.startsWith('mailto:')) {
+            a.href = 'mailto:' + text;
+        } else if (/^mailto:/.test(text)) {
+            a.href = text;
+            a.textContent = text.replace('mailto:', '');
+        }
+    });
+
+    // Hide long proxy URLs shown as "&lt;https://protect.checkpoint.com/...&gt;" after a readable link
+    // These appear as: <a>readable</a> &lt;<a>long_proxy_url</a>&gt;
+    div.querySelectorAll('a[href]').forEach(a => {
+        if (/protect\.checkpoint\.com|safelinks\.protection\.outlook/.test(a.href)) {
+            // Walk backwards/forwards to remove the surrounding &lt; &gt; text and the link itself
+            let node = a;
+            // Check previous text node for "&lt;" or "<"
+            const prev = node.previousSibling;
+            if (prev && prev.nodeType === 3) {
+                prev.textContent = prev.textContent.replace(/\s*<?\s*$/, '');
+            }
+            // Check next text node for "&gt;" or ">" — leave a space if text follows
+            const next = node.nextSibling;
+            if (next && next.nodeType === 3) {
+                const cleaned = next.textContent.replace(/^\s*>?\s*/, '');
+                next.textContent = cleaned ? ' ' + cleaned : '';
+            }
+            a.remove();
+        }
+    });
+
+    return div.innerHTML;
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     const pathParts = location.pathname.split('/');
     const prettyId = decodeURIComponent(pathParts[pathParts.length - 1]);
@@ -34,7 +79,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             <div class="detail-grid">
                 <div class="detail-main">
                     <div class="request-text-box">
-                        ${req.request_text_html || escapeHtml(req.request_text || 'No request text available')}
+                        ${cleanRequestHtml(req.request_text_html) || escapeHtml(req.request_text || 'No request text available')}
                     </div>
 
                     ${req.timeline.length ? `
