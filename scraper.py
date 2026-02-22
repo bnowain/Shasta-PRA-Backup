@@ -40,7 +40,6 @@ import json
 import os
 import re
 import sqlite3
-import sys
 import time
 import hashlib
 from datetime import datetime
@@ -50,10 +49,6 @@ import requests as http_requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-# Fix Windows console encoding (cp1252 can't handle emoji in print statements)
-if sys.stdout.encoding and sys.stdout.encoding.lower() not in ('utf-8', 'utf8'):
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
-    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -219,9 +214,9 @@ class API:
         meta = soup.find('meta', {'name': 'csrf-token'})
         if meta:
             self.session.headers['X-CSRF-Token'] = meta['content']
-            print("  ✅ Session ready")
+            print("  [OK] Session ready")
         else:
-            print("  ⚠️  No CSRF token found")
+            print("  [!]  No CSRF token found")
 
         self.session.headers['Accept'] = 'application/json, text/plain, */*'
         self.session.headers['X-Requested-With'] = 'XMLHttpRequest'
@@ -235,18 +230,18 @@ class API:
                 if r.status_code == 200:
                     return r.json()
                 elif r.status_code == 401:
-                    print(f"\n  ⚠️  401 on {path} — refreshing session")
+                    print(f"\n  [!]  401 on {path} — refreshing session")
                     self.init_session()
                 elif r.status_code == 429:
                     wait = RETRY_BACKOFF * (attempt + 1)
-                    print(f"\n  ⚠️  Rate limited, waiting {wait}s")
+                    print(f"\n  [!]  Rate limited, waiting {wait}s")
                     time.sleep(wait)
                 elif r.status_code == 404:
                     return None
                 else:
-                    print(f"\n  ⚠️  HTTP {r.status_code} on {path}")
+                    print(f"\n  [!]  HTTP {r.status_code} on {path}")
             except Exception as e:
-                print(f"\n  ⚠️  Error on {path}: {e}")
+                print(f"\n  [!]  Error on {path}: {e}")
             if attempt < MAX_RETRIES - 1:
                 time.sleep(RETRY_BACKOFF)
         return None
@@ -299,7 +294,7 @@ class API:
             else:
                 return None
         except Exception as e:
-            print(f"\n  ⚠️  Download redirect error for doc {doc_id}: {e}")
+            print(f"\n  [!]  Download redirect error for doc {doc_id}: {e}")
             return None
 
     def download_file(self, url, dest_path, timeout=180):
@@ -339,10 +334,10 @@ class Scraper:
     # ── Phase 1 ──────────────────────────────────────────────────────
 
     def phase1_departments(self):
-        print("\n📋 Phase 1: Departments...")
+        print("\n-- Phase 1: Departments...")
         depts = self.api.get_departments()
         if not depts or not isinstance(depts, list):
-            print("  ⚠️  No department data")
+            print("  [!]  No department data")
             return
         for d in depts:
             if isinstance(d, dict):
@@ -350,13 +345,13 @@ class Scraper:
                     "INSERT OR REPLACE INTO departments (id,name,poc_id,raw_json) VALUES(?,?,?,?)",
                     (d.get('id'), d.get('name'), d.get('poc_id'), json.dumps(d)))
         self.conn.commit()
-        print(f"  ✅ {len(depts)} departments")
+        print(f"  [OK] {len(depts)} departments")
         time.sleep(DELAY_API)
 
     # ── Phase 2 ──────────────────────────────────────────────────────
 
     def phase2_listings(self):
-        print("\n📋 Phase 2: Request listings...")
+        print("\n-- Phase 2: Request listings...")
         page = 1
         total = 0
 
@@ -434,12 +429,12 @@ class Scraper:
             page += 1
             time.sleep(DELAY_API)
 
-        print(f"\n  ✅ {total} requests indexed")
+        print(f"\n  [OK] {total} requests indexed")
 
     # ── Phase 3 ──────────────────────────────────────────────────────
 
     def phase3_details(self, resume_from=None):
-        print("\n📄 Phase 3: Details + timelines + document lists...")
+        print("\n-- Phase 3: Details + timelines + document lists...")
 
         # Detect records marked as scraped but with incomplete data
         incomplete = self.conn.execute("""
@@ -459,7 +454,7 @@ class Scraper:
                 "UPDATE requests SET detail_scraped=0 WHERE pretty_id=?",
                 [(pid,) for pid in ids])
             self.conn.commit()
-            print(f"  ⚠️  {len(ids)} records with incomplete data queued for re-scrape")
+            print(f"  [!]  {len(ids)} records with incomplete data queued for re-scrape")
 
         if resume_from:
             rows = self.conn.execute(
@@ -486,7 +481,7 @@ class Scraper:
             time.sleep(DELAY_API)
             if (i + 1) % 50 == 0:
                 self.conn.commit()
-                tqdm.write(f"  💾 Checkpoint at {i+1}")
+                tqdm.write(f"  -- Checkpoint at {i+1}")
 
         self.conn.commit()
 
@@ -666,7 +661,7 @@ class Scraper:
     # ── Phase 4 ──────────────────────────────────────────────────────
 
     def phase4_download(self):
-        print("\n📥 Phase 4: Downloading documents...")
+        print("\n-- Phase 4: Downloading documents...")
 
         pending = self.conn.execute("""
             SELECT id, request_pretty_id, title, asset_url
@@ -742,9 +737,9 @@ class Scraper:
                 self.conn.commit()
 
         self.conn.commit()
-        print(f"\n  ✅ Downloaded: {ok}")
+        print(f"\n  [OK] Downloaded: {ok}")
         if fail:
-            print(f"  ⚠️  Failed: {fail}")
+            print(f"  [!]  Failed: {fail}")
 
     def download_only(self):
         self.api.init_session()
@@ -822,8 +817,8 @@ def main():
                  ("complete", json.dumps(stats)))
     conn.commit()
     conn.close()
-    print(f"\n  📁 {DB_PATH.absolute()}")
-    print("🎉 Done!")
+    print(f"\n  -- {DB_PATH.absolute()}")
+    print("-- Done!")
 
 
 if __name__ == "__main__":

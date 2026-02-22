@@ -24,6 +24,9 @@ def _send(q, phase, message, progress, **extra):
 def _worker(q):
     try:
         import re
+        import sys
+        # Force fresh import so uvicorn reload picks up scraper.py changes
+        sys.modules.pop('scraper', None)
         from scraper import (API, Scraper, init_db, RAW_DIR, OUTPUT_DIR,
                              DOCS_DIR, DELAY_API, DELAY_DOWNLOAD)
 
@@ -335,7 +338,9 @@ def _worker(q):
         _send(q, "done", f"Complete: {summary} ({final_req} total requests)", 100)
 
     except Exception as e:
-        _send(q, "error", f"Scrape failed: {e}", -1)
+        import traceback
+        tb = traceback.format_exc()
+        _send(q, "error", f"Scrape failed: {e}\n{tb}", -1)
     finally:
         q.put(None)  # sentinel to end SSE stream
 
