@@ -149,12 +149,60 @@ Spoke key: `shasta_pra`. Registered in Atlas config on port 8845. Tools: `search
 - Path traversal protection on document serving
 - Dates in DB are `MM/DD/YYYY`, but API responses return ISO `YYYY-MM-DD` via Pydantic validators. Date range filtering in SQL uses `substr()` for comparison against raw DB values. API consumers always receive ISO dates.
 
-## Master Schema Reference
+## Testing
 
-**`E:\0-Automated-Apps\MASTER_SCHEMA.md`** contains the canonical cross-project
-database schema. If you add, remove, or modify any database tables or fields in
-this project, **you must update the Master Schema** to keep it in sync. The agent
-is authorized and encouraged to edit that file directly.
+No formal test suite exists yet. Use Playwright for browser-based UI testing and pytest for API/service tests.
+
+### Setup
+
+```bash
+pip install playwright pytest httpx
+python -m playwright install chromium
+```
+
+### Running Tests
+
+```bash
+pytest tests/ -v
+pytest tests/ -v -k "browser"    # Playwright UI tests only
+pytest tests/ -v -k "api"        # API tests only
+```
+
+### Writing Tests
+
+- **Browser tests** go in `tests/test_browser.py` — use Playwright to verify the web UI (request list, search, document lightbox with preview/transcript, department filtering, stats dashboard)
+- **API tests** go in `tests/test_api.py` — use httpx against FastAPI endpoints
+- **Service tests** go in `tests/test_services.py` — unit tests for document processing, transcription client, PDF conversion
+- The server must be running at localhost:8845 for browser tests
+
+### Key Flows to Test
+
+1. **Request browsing**: list loads, filters work, detail view shows timeline
+2. **Document preview**: lightbox opens, PDF renders inline, Office docs show converted preview
+3. **Transcription**: audio/video documents show transcript below player
+4. **Search**: full-text search returns results across requests and documents
+5. **Stats dashboard**: charts render with correct aggregate data
+
+## Master Schema & Codex References
+
+**`E:\0-Automated-Apps\MASTER_SCHEMA.md`** — Canonical cross-project database
+schema and API contracts. **HARD RULE: If you add, remove, or modify any database
+tables, columns, API endpoints, or response shapes, you MUST update the Master
+Schema before finishing your task.** Do not skip this — other projects read it to
+understand this project's data contracts.
 
 **`E:\0-Automated-Apps\MASTER_PROJECT.md`** describes the overall ecosystem
 architecture and how all projects interconnect.
+
+> **HARD RULE — READ AND UPDATE THE CODEX**
+>
+> **`E:\0-Automated-Apps\master_codex.md`** is the living interoperability codex.
+> 1. **READ it** at the start of any session that touches APIs, schemas, tools,
+>    chunking, person models, search, or integration with other projects.
+> 2. **UPDATE it** before finishing any task that changes cross-project behavior.
+>    This includes: new/changed API endpoints, database schema changes, new tools
+>    or tool modifications in Atlas, chunking strategy changes, person model changes,
+>    new cross-spoke dependencies, or completing items from a project's outstanding work list.
+> 3. **DO NOT skip this.** The codex is how projects stay in sync. If you change
+>    something that another project depends on and don't update the codex, the next
+>    agent working on that project will build on stale assumptions and break things.
