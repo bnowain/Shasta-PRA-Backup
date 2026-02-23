@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.config import BASE_DIR
-from app.routers import requests, departments, search, stats, documents, scrape
+from app.routers import requests, departments, search, stats, documents, scrape, people
 
 app = FastAPI(
     title="Shasta PRA Backup",
@@ -24,6 +24,7 @@ app.include_router(search.router)
 app.include_router(stats.router)
 app.include_router(documents.router)
 app.include_router(scrape.router)
+app.include_router(people.router)
 
 # ── Static files ──────────────────────────────────────────────────────────────
 _static_dir = BASE_DIR / "app" / "static"

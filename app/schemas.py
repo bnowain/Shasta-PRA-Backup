@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
+
+
+def _to_iso(date_str: str | None) -> str | None:
+    """Convert MM/DD/YYYY to YYYY-MM-DD (ISO 8601)."""
+    if not date_str:
+        return date_str
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", date_str)
+    if m:
+        return f"{m.group(3)}-{m.group(1)}-{m.group(2)}"
+    return date_str
 
 
 # ── Request models ────────────────────────────────────────────────────────────
@@ -18,6 +29,11 @@ class RequestSummary(BaseModel):
     request_date: Optional[str] = None
     due_date: Optional[str] = None
     doc_count: int = 0
+
+    @field_validator("request_date", "due_date", mode="before")
+    @classmethod
+    def _dates_to_iso(cls, v: str | None) -> str | None:
+        return _to_iso(v)
 
 
 class TimelineEventOut(BaseModel):
@@ -40,6 +56,11 @@ class DocumentOut(BaseModel):
     asset_url: Optional[str] = None
     request_pretty_id: Optional[str] = None
 
+    @field_validator("upload_date", mode="before")
+    @classmethod
+    def _dates_to_iso(cls, v: str | None) -> str | None:
+        return _to_iso(v)
+
 
 class RequestDetail(BaseModel):
     pretty_id: str
@@ -59,6 +80,11 @@ class RequestDetail(BaseModel):
     page_url: Optional[str] = None
     timeline: list[TimelineEventOut] = []
     documents: list[DocumentOut] = []
+
+    @field_validator("request_date", "due_date", "closed_date", mode="before")
+    @classmethod
+    def _dates_to_iso(cls, v: str | None) -> str | None:
+        return _to_iso(v)
 
 
 # ── Department models ─────────────────────────────────────────────────────────

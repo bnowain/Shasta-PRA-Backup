@@ -51,6 +51,36 @@ def _ensure_tables():
                 FOREIGN KEY (document_id) REFERENCES documents(id)
             )
         """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                canonical_name TEXT NOT NULL UNIQUE,
+                aliases TEXT,
+                role TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            )
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS request_people (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                request_pretty_id TEXT NOT NULL,
+                person_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'manual',
+                created_at TEXT DEFAULT (datetime('now')),
+                FOREIGN KEY (request_pretty_id) REFERENCES requests(pretty_id),
+                FOREIGN KEY (person_id) REFERENCES people(id),
+                UNIQUE(request_pretty_id, person_id, role)
+            )
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_request_people_request
+            ON request_people(request_pretty_id)
+        """))
+        conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS idx_request_people_person
+            ON request_people(person_id)
+        """))
         # Backfill file_size_mb from actual file_size_bytes where missing/zero
         conn.execute(text("""
             UPDATE documents SET file_size_mb = ROUND(file_size_bytes / (1024.0 * 1024.0), 2)

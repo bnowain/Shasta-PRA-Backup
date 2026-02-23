@@ -147,4 +147,14 @@ Spoke key: `shasta_pra`. Registered in Atlas config on port 8845. Tools: `search
 - All API responses go through Pydantic schemas
 - Frontend: each page has its own `.html` + `.js` pair, shared utilities in `app.js`
 - Path traversal protection on document serving
-- Dates in DB are `MM/DD/YYYY`, date range filtering rearranges with `substr()` for comparison
+- Dates in DB are `MM/DD/YYYY`, but API responses return ISO `YYYY-MM-DD` via Pydantic validators. Date range filtering in SQL uses `substr()` for comparison against raw DB values. API consumers always receive ISO dates.
+
+## Master Schema Reference
+
+**`E:\0-Automated-Apps\MASTER_SCHEMA.md`** contains the canonical cross-project
+database schema. If you add, remove, or modify any database tables or fields in
+this project, **you must update the Master Schema** to keep it in sync. The agent
+is authorized and encouraged to edit that file directly.
+
+**`E:\0-Automated-Apps\MASTER_PROJECT.md`** describes the overall ecosystem
+architecture and how all projects interconnect.
