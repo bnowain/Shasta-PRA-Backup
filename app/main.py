@@ -96,3 +96,20 @@ def health():
         "documents": doc_count,
         "departments": dept_count,
     }
+
+
+# ── Shutdown ─────────────────────────────────────────────────────────────────
+
+@app.post("/api/system/shutdown", tags=["system"])
+async def system_shutdown():
+    """Gracefully shut down the server."""
+    import asyncio, logging, os
+    logger = logging.getLogger(__name__)
+    logger.info("Shutdown requested, exiting in 500ms")
+
+    async def _exit_soon():
+        await asyncio.sleep(0.5)
+        os._exit(0)
+
+    asyncio.get_event_loop().create_task(_exit_soon())
+    return {"status": "shutting_down", "killed": []}
