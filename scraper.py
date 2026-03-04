@@ -36,10 +36,13 @@ Usage:
 """
 
 import argparse
+import atexit
 import json
 import os
 import re
+import socket
 import sqlite3
+import subprocess
 import time
 import hashlib
 from datetime import datetime
@@ -64,6 +67,186 @@ DELAY_SUB = 0.3          # between timeline/doc sub-requests for one request
 DELAY_DOWNLOAD = 0.75    # between file downloads
 MAX_RETRIES = 3
 RETRY_BACKOFF = 5
+
+
+# ─── Tor (opt-in fallback via --tor) ─────────────────────────────────────────
+
+# Shared tor-bundle from Facebook-Monitor (has obfs4 bridges pre-configured)
+TOR_BUNDLE_DIR = Path("E:/0-Automated-Apps/Facebook-Monitor/tor-bundle")
+TOR_EXE = TOR_BUNDLE_DIR / "tor" / "tor.exe"
+TORRC_TEMPLATE = TOR_BUNDLE_DIR / "torrc"
+# Unique ports for this project — won't collide with FB-Monitor (9050/9051)
+TOR_SOCKS_PORT = 9070
+TOR_CONTROL_PORT = 9170
+TOR_DATA_DIR = OUTPUT_DIR / "tor-data"
+
+_tor_process = None   # module-level handle for cleanup
+
+
+def _is_port_in_use(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        return s.connect_ex(("127.0.0.1", port)) == 0
+
+
+def start_tor() -> bool:
+    """Start a single Tor instance with obfs4 bridges. Returns True on success."""
+    global _tor_process
+
+    if not TOR_EXE.exists():
+        print(f"  [!] tor.exe not found: {TOR_EXE}")
+        return False
+    if not TORRC_TEMPLATE.exists():
+        print(f"  [!] torrc not found: {TORRC_TEMPLATE}")
+        return False
+
+    # Already running?
+    if _is_port_in_use(TOR_SOCKS_PORT):
+        print(f"  [OK] Tor already running on SOCKS port {TOR_SOCKS_PORT}")
+        return True
+
+    print(f"  Starting Tor with obfs4 bridges (SOCKS:{TOR_SOCKS_PORT})...")
+
+    # Build torrc from template — override ports/paths, resolve relative paths
+    TOR_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    lock_file = TOR_DATA_DIR / "lock"
+    if lock_file.exists():
+        try:
+            lock_file.unlink()
+        except Exception:
+            pass
+
+    # Seed cached descriptors from FB-Monitor's main instance for fast bootstrap
+    main_data = TOR_BUNDLE_DIR / "tor-data"
+    if main_data.exists():
+        for fname in ("cached-certs", "cached-microdesc-consensus",
+                      "cached-microdescs", "cached-microdescs.new",
+                      "cached-descriptors", "cached-descriptors.new"):
+            src = main_data / fname
+            dst = TOR_DATA_DIR / fname
+            if src.exists() and (not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime):
+                try:
+                    import shutil
+                    shutil.copy2(str(src), str(dst))
+                except Exception:
+                    pass
+
+    base_lines = TORRC_TEMPLATE.read_text(encoding='utf-8').splitlines()
+    out_lines = []
+    strip_keys = {"socksport", "controlport", "datadirectory", "log"}
+
+    for line in base_lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            out_lines.append(line)
+            continue
+        key = stripped.split()[0].lower()
+        if key in strip_keys:
+            continue
+        if key == "clienttransportplugin":
+            parts = stripped.split()
+            for i, part in enumerate(parts):
+                if part.startswith("./"):
+                    parts[i] = str(TOR_BUNDLE_DIR / part[2:])
+            out_lines.append(" ".join(parts))
+        elif key in ("geoipfile", "geoipv6file"):
+            parts = stripped.split(maxsplit=1)
+            if len(parts) == 2 and parts[1].startswith("./"):
+                parts[1] = str(TOR_BUNDLE_DIR / parts[1][2:])
+            out_lines.append(" ".join(parts))
+        else:
+            out_lines.append(line)
+
+    data_str = str(TOR_DATA_DIR).replace("\\", "/")
+    log_str = str(OUTPUT_DIR / "tor.log").replace("\\", "/")
+    out_lines.extend([
+        "", "# PRA scraper instance",
+        f"SocksPort {TOR_SOCKS_PORT}",
+        f"ControlPort {TOR_CONTROL_PORT}",
+        f"DataDirectory {data_str}",
+        f"Log notice file {log_str}",
+    ])
+
+    torrc_path = OUTPUT_DIR / "torrc-pra"
+    torrc_path.write_text("\n".join(out_lines), encoding='utf-8')
+
+    try:
+        _tor_process = subprocess.Popen(
+            [str(TOR_EXE), "-f", str(torrc_path)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        atexit.register(stop_tor)
+    except Exception as e:
+        print(f"  [!] Failed to launch Tor: {e}")
+        return False
+
+    # Wait for bootstrap via control port
+    deadline = time.time() + 120
+    last_pct = -1
+    while time.time() < deadline:
+        try:
+            sock = socket.create_connection(("127.0.0.1", TOR_CONTROL_PORT), timeout=5)
+            sock.sendall(b"AUTHENTICATE\r\n")
+            resp = sock.recv(256).decode()
+            if "250" in resp:
+                sock.sendall(b"GETINFO status/bootstrap-phase\r\n")
+                status = sock.recv(512).decode()
+                sock.close()
+                if "PROGRESS=" in status:
+                    pct = int(status.split("PROGRESS=")[1].split()[0])
+                    if pct != last_pct:
+                        print(f"  Tor bootstrap: {pct}%")
+                        last_pct = pct
+                    if pct >= 100:
+                        print(f"  [OK] Tor ready — SOCKS5 on 127.0.0.1:{TOR_SOCKS_PORT}")
+                        return True
+            else:
+                sock.close()
+        except (ConnectionRefusedError, OSError):
+            pass
+        time.sleep(3)
+
+    print("  [!] Tor bootstrap timed out after 120s")
+    return _is_port_in_use(TOR_SOCKS_PORT)  # might still work
+
+
+def stop_tor():
+    """Terminate our Tor instance."""
+    global _tor_process
+    if _tor_process is None:
+        return
+    if _tor_process.poll() is not None:
+        _tor_process = None
+        return
+    try:
+        _tor_process.terminate()
+        _tor_process.wait(timeout=10)
+    except Exception:
+        try:
+            _tor_process.kill()
+        except Exception:
+            pass
+    _tor_process = None
+    print("  Tor stopped.")
+
+
+def renew_tor_circuit() -> bool:
+    """Send NEWNYM to get a fresh exit IP."""
+    try:
+        sock = socket.create_connection(("127.0.0.1", TOR_CONTROL_PORT), timeout=5)
+        sock.sendall(b"AUTHENTICATE\r\n")
+        resp = sock.recv(256).decode()
+        if "250" not in resp:
+            sock.close()
+            return False
+        sock.sendall(b"SIGNAL NEWNYM\r\n")
+        resp = sock.recv(256).decode()
+        sock.close()
+        return "250" in resp
+    except Exception:
+        return False
 
 LISTING_PAGE_SIZE = 100
 DOC_PAGE_SIZE = 100
@@ -195,13 +378,17 @@ def init_db(db_path):
 # ─── API Client ──────────────────────────────────────────────────────────────
 
 class API:
-    def __init__(self):
+    def __init__(self, use_tor=False):
         self.session = http_requests.Session()
         self.session.headers.update({
             'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                           'AppleWebKit/537.36 (KHTML, like Gecko) '
                           'Chrome/131.0.0.0 Safari/537.36'),
         })
+        self.use_tor = use_tor
+        if use_tor:
+            proxy = f"socks5h://127.0.0.1:{TOR_SOCKS_PORT}"
+            self.session.proxies = {"http": proxy, "https": proxy}
 
     def init_session(self):
         """Load main page → session cookie + CSRF token."""
@@ -761,23 +948,35 @@ def main():
                        help="Only fetch request listings (fastest)")
     parser.add_argument('--full-rescrape', action='store_true',
                        help="Re-scrape details for ALL requests, not just unscraped ones")
+    parser.add_argument('--update', action='store_true',
+                       help="Update recently closed (last 60 days) and all open requests")
+    parser.add_argument('--tor', action='store_true',
+                       help="Route requests through Tor (obfs4 bridges) — use if IP-blocked")
     args = parser.parse_args()
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     DOCS_DIR.mkdir(parents=True, exist_ok=True)
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Start Tor if requested
+    if args.tor:
+        if not start_tor():
+            print("\n  [!] Tor failed to start — falling back to direct connection")
+            args.tor = False
+
     conn = init_db(DB_PATH)
     conn.execute("INSERT INTO scrape_log (action,detail) VALUES(?,?)",
                  ("start", json.dumps(vars(args))))
     conn.commit()
 
-    api = API()
+    api = API(use_tor=args.tor)
     scraper = Scraper(conn, api)
 
     print("=" * 60)
     print("  Shasta County NextRequest Scraper v3")
     print(f"  Target:   {BASE_URL}")
+    if args.tor:
+        print(f"  Tor:      SOCKS5 on 127.0.0.1:{TOR_SOCKS_PORT}")
     print(f"  Database: {DB_PATH.absolute()}")
     print("=" * 60)
 
@@ -786,6 +985,39 @@ def main():
         conn.execute("UPDATE requests SET detail_scraped=0")
         conn.commit()
         print(f"  Reset {count} records for full re-scrape")
+    
+    if args.update:
+        # 1. Any currently Open requests
+        # 2. Any requests where closed_date or request_date is within last 60 days
+        # Dates in DB are MM/DD/YYYY, which is hard to query in SQL directly
+        # We'll fetch them and filter in Python
+        from datetime import timedelta
+        cutoff = datetime.now() - timedelta(days=60)
+        print(f"  Performing 60-day lookback update (cutoff: {cutoff.strftime('%Y-%m-%d')})...")
+        
+        rows = conn.execute("SELECT pretty_id, request_date, closed_date, request_state FROM requests").fetchall()
+        to_rescrape = []
+        for pid, r_date, c_date, state in rows:
+            is_open = state.lower() != 'closed'
+            recent = False
+            try:
+                # Try parsing request_date or closed_date
+                for d_str in [c_date, r_date]:
+                    if d_str:
+                        dt = datetime.strptime(d_str.split(' ')[0], '%m/%d/%Y')
+                        if dt >= cutoff:
+                            recent = True
+                            break
+            except:
+                pass
+            
+            if is_open or recent:
+                to_rescrape.append(pid)
+        
+        if to_rescrape:
+            print(f"  Queuing {len(to_rescrape)} records for update...")
+            conn.executemany("UPDATE requests SET detail_scraped=0 WHERE pretty_id=?", [(pid,) for pid in to_rescrape])
+            conn.commit()
 
     if args.docs_only:
         scraper.download_only()
