@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
-from app.config import (BASE_DIR, DOCS_DIR, SOFFICE_PATH, CONVERTIBLE_EXTENSIONS,
+from app.config import (BASE_DIR, STORAGE_ROOT, DOCS_DIR, SOFFICE_PATH, CONVERTIBLE_EXTENSIONS,
                         TRANSCRIBABLE_EXTENSIONS, TEXT_EXTRACTABLE_EXTENSIONS,
                         DIRECT_READ_EXTENSIONS)
 from app.database import get_db
@@ -56,7 +56,7 @@ def _resolve_doc_path(doc: dict) -> Path:
 
     file_path = Path(doc["local_path"])
     if not file_path.is_absolute():
-        file_path = BASE_DIR / file_path
+        file_path = STORAGE_ROOT / file_path
 
     try:
         resolved = file_path.resolve()

@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from app.config import (
     DB_PATH, BASE_DIR,
     TEXT_EXTRACTABLE_EXTENSIONS, DIRECT_READ_EXTENSIONS, CONVERTIBLE_EXTENSIONS,
+    IMAGE_OCR_EXTENSIONS, SURYA_MIN_CHARS_PER_PAGE,
 )
 
 
@@ -28,7 +29,7 @@ def get_documents(conn, force=False, limit=0, pdf_only=False):
     if pdf_only:
         exts = TEXT_EXTRACTABLE_EXTENSIONS
     else:
-        exts = TEXT_EXTRACTABLE_EXTENSIONS | DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
+        exts = TEXT_EXTRACTABLE_EXTENSIONS | DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS | IMAGE_OCR_EXTENSIONS
 
     ext_list = ",".join(f"'{e}'" for e in exts)
 
@@ -51,8 +52,13 @@ def get_documents(conn, force=False, limit=0, pdf_only=False):
               AND d.local_path IS NOT NULL
               AND LOWER(d.file_extension) IN ({ext_list})
               AND d.id NOT IN (
-                  SELECT DISTINCT document_id FROM document_text
-                  WHERE method IN ('pymupdf', 'direct_read')
+                  SELECT document_id FROM document_text
+                  WHERE method IN ('surya', 'direct_read')
+                  UNION
+                  SELECT document_id FROM document_text
+                  WHERE method = 'pymupdf'
+                  GROUP BY document_id
+                  HAVING SUM(LENGTH(text_content)) >= {SURYA_MIN_CHARS_PER_PAGE}
               )
             ORDER BY d.file_size_mb ASC
         """

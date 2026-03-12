@@ -104,27 +104,42 @@ Transcribes audio/video documents (MP4, MKV, M4A, WAV, etc.) via civic_media's f
 
 **Search:** `document_text.text_content` is included in `/api/search` results
 
-### 3. OCR & Text Extraction (planned)
+### 3. OCR & Text Extraction — COMPLETE
 
-Extracts text from all documents for full-text search and creates searchable PDFs for scanned documents.
+Extracts text from all documents for full-text search. 3-stage pipeline per `VISION_PIPELINE.md`.
 
-**Tech stack:** PyMuPDF (fitz) + EasyOCR (handles handwriting)
+**Tech stack:** PyMuPDF (Stage 1) → Surya OCR GPU (Stage 2) → VLM description (Stage 3)
 
 **Processing strategy:**
-| Type | Method |
-|------|--------|
-| PDF with native text | PyMuPDF text extraction |
-| Scanned/image PDF | Render pages → EasyOCR → store text + create `.searchable.pdf` with invisible text overlay |
-| Mixed PDF | Per-page: native where available, OCR where scanned |
-| Office docs | Extract from existing `.preview.pdf` via PyMuPDF |
-| TXT, CSV | Read directly |
-| JPG, PNG, TIF | EasyOCR on image |
+| Type | Stage | Method |
+|------|-------|--------|
+| PDF with native text | 1 | PyMuPDF |
+| Scanned/image PDF | 1→2 | PyMuPDF per-page → Surya fallback for pages < 50 chars |
+| Office docs | 1→2 | Extract from `.preview.pdf` via same PDF path |
+| TXT, CSV | 1 | Direct read |
+| JPG, PNG, TIF | 2 | Surya directly |
+| Photos, maps, diagrams (no text) | 3 | VLM description via Mission Control |
 
-**Database:** `document_text` table (per-page, with FTS5 index) + `ocr_processing_log` for resume capability
+**Key files:**
+- `app/services/ocr.py` — Stages 1+2: PyMuPDF + Surya subprocess
+- `app/services/vision.py` — Stage 3: VLM via MC (`vision_model` class), Ollama fallback
+- `scripts/surya_worker.py` — Surya worker running in civic_media's Python 3.11 venv
+- `ocr_documents.py` — Batch OCR: `python ocr_documents.py [--force] [--dry-run] [--limit N]`
+- `describe_documents.py` — Batch VLM: `python describe_documents.py [--test] [--dry-run] [--limit N]`
 
-**Batch script:** `python ocr_documents.py [--force] [--dry-run] [--pdf-only] [--limit N]`
+**Surya:** Installed in `civic_media/venv` (GPU PyTorch, RTX 5090). Called via subprocess
+to avoid Python 3.13/3.11 ABI incompatibility. See `civic_media/SURYA_INSTALL.md`.
 
-**File naming:** `documents/24-4/scan.pdf` → `documents/24-4/scan.pdf.searchable.pdf`
+**VLM routing:** All VLM calls go through Mission Control (`POST :8860/models/run`,
+`model_id: "vision_model"`). MC routes to best available local model (llama3.2-vision:11b
+or qwen2-vl:7b), with claude-haiku cloud fallback. Online/cloud tools seeding the DB
+can use any vision-capable model — always set `model_id` to the full model name.
+
+**Database:** `document_text` table — one row per page.
+- `method`: `'pymupdf'` | `'surya'` | `'direct_read'` | `'vlm_description'`
+- `model_id`: NULL for non-LLM rows; model name for VLM results (e.g., `'llama3.2-vision:11b'`)
+
+**Full pipeline standard:** `E:\0-Automated-Apps\VISION_PIPELINE.md`
 
 ### Reusable Patterns for Other Projects
 

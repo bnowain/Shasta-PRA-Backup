@@ -1,33 +1,50 @@
-"""Text extraction service — extracts native text from PDFs and reads text files.
+"""Text extraction service — native text via PyMuPDF, scanned/image OCR via Surya.
 
-Works with both raw sqlite3 connections (batch script) and SQLAlchemy connections (API routes).
-Phase 1: PyMuPDF for native PDF text + direct read for TXT/CSV.
-Phase 2 (future): EasyOCR for scanned pages and images.
+Processing strategy per document type:
+  PDF with native text  → PyMuPDF (fast, exact)
+  Scanned/image PDF     → PyMuPDF per page, Surya fallback for pages below char threshold
+  Office docs           → Extract from .preview.pdf via same PDF path
+  TXT / CSV             → Direct read
+  Images (jpg/png/tif)  → Surya directly
+
+Surya runs as a subprocess via civic_media's Python venv (GPU PyTorch, RTX 5090).
+This avoids Python 3.13/3.11 ABI incompatibility with compiled packages (numpy, torch).
+See civic_media/SURYA_INSTALL.md and VISION_PIPELINE.md.
 """
 
+import json
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 
 from app.config import (
     BASE_DIR,
-    TEXT_EXTRACTABLE_EXTENSIONS,
-    DIRECT_READ_EXTENSIONS,
+    CIVIC_MEDIA_PYTHON,
     CONVERTIBLE_EXTENSIONS,
+    DIRECT_READ_EXTENSIONS,
+    IMAGE_OCR_EXTENSIONS,
     OCR_MAX_FILE_SIZE_MB,
+    SURYA_MIN_CHARS_PER_PAGE,
+    SURYA_WORKER,
+    TEXT_EXTRACTABLE_EXTENSIONS,
 )
 
 log = logging.getLogger(__name__)
 
 
+def is_surya_available() -> bool:
+    """Return True if civic_media's python and the surya worker script exist."""
+    return (CIVIC_MEDIA_PYTHON is not None
+            and Path(CIVIC_MEDIA_PYTHON).exists()
+            and Path(SURYA_WORKER).exists())
+
+
 # ── Connection helpers (sqlite3 vs sqlalchemy) ───────────────────────────────
 
 def _execute(conn, sql, params=None):
-    """Execute SQL on either a raw sqlite3 or sqlalchemy connection."""
     if hasattr(conn, "execute") and hasattr(conn, "cursor"):
-        if params:
-            return conn.execute(sql, params)
-        return conn.execute(sql)
+        return conn.execute(sql, params) if params else conn.execute(sql)
     else:
         from sqlalchemy import text
         if params:
@@ -42,50 +59,93 @@ def _execute(conn, sql, params=None):
 
 
 def _commit(conn):
-    """Commit on either connection type."""
-    if hasattr(conn, "cursor"):
-        conn.commit()
-    else:
-        conn.commit()
+    conn.commit()
 
 
 def _fetchall(result):
-    """Fetch all rows as dicts from either connection type."""
     if hasattr(result, "mappings"):
         return [dict(r) for r in result.mappings().all()]
-    else:
-        cols = [d[0] for d in result.description]
-        return [dict(zip(cols, row)) for row in result.fetchall()]
+    cols = [d[0] for d in result.description]
+    return [dict(zip(cols, row)) for row in result.fetchall()]
 
 
 def _fetchone(result):
-    """Fetch one row as dict from either connection type."""
     if hasattr(result, "mappings"):
         row = result.mappings().first()
         return dict(row) if row else None
-    else:
-        row = result.fetchone()
-        if not row:
-            return None
-        cols = [d[0] for d in result.description]
-        return dict(zip(cols, row))
+    row = result.fetchone()
+    if not row:
+        return None
+    cols = [d[0] for d in result.description]
+    return dict(zip(cols, row))
 
 
-# ── Core extraction functions ────────────────────────────────────────────────
+# ── Core extraction ───────────────────────────────────────────────────────────
+
+def _surya_ocr(image_specs: list) -> list[str]:
+    """Run Surya on a batch of image specs via civic_media's python subprocess.
+
+    image_specs: list of dicts — either {"path": "..."} or {"pdf_path": "...", "page": N}
+    Returns: list of text strings, one per spec.
+    """
+    payload = json.dumps({"images": image_specs})
+    proc = subprocess.run(
+        [CIVIC_MEDIA_PYTHON, SURYA_WORKER],
+        input=payload,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        encoding="utf-8",
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"surya_worker exited {proc.returncode}: {proc.stderr[:500]}")
+    response = json.loads(proc.stdout)
+    if response.get("error"):
+        raise RuntimeError(f"surya_worker error: {response['error']}")
+    return response["results"]
+
 
 def extract_text_from_pdf(file_path: Path) -> list[dict]:
-    """Extract text from each page of a PDF using PyMuPDF.
+    """Extract text from each page of a PDF.
 
-    Returns: list of {page_number: int, text: str}
+    Uses PyMuPDF for native text. For pages below SURYA_MIN_CHARS_PER_PAGE,
+    falls back to Surya OCR if available.
+
+    Returns: list of {page_number, text, method}
     """
-    import fitz  # PyMuPDF
+    import fitz
 
     pages = []
     with fitz.open(str(file_path)) as doc:
         for i, page in enumerate(doc):
-            text = page.get_text()
-            pages.append({"page_number": i, "text": text.strip() if text else ""})
+            text = page.get_text().strip()
+            pages.append({"page_number": i, "text": text, "method": "pymupdf"})
+
+    if not is_surya_available():
+        return pages
+
+    # Find pages that likely need OCR
+    scanned = [p["page_number"] for p in pages if len(p["text"]) < SURYA_MIN_CHARS_PER_PAGE]
+    if not scanned:
+        return pages
+
+    log.info(f"{file_path.name}: {len(scanned)} scanned page(s) → Surya")
+    try:
+        specs = [{"pdf_path": str(file_path), "page": idx} for idx in scanned]
+        texts = _surya_ocr(specs)
+        for page_idx, text in zip(scanned, texts):
+            pages[page_idx]["text"] = text
+            pages[page_idx]["method"] = "surya"
+    except Exception as e:
+        log.warning(f"Surya fallback failed for {file_path.name}: {e}")
+
     return pages
+
+
+def extract_text_from_image(file_path: Path) -> str:
+    """Run Surya OCR on a standalone image file (jpg, png, tif, etc.)."""
+    texts = _surya_ocr([{"path": str(file_path)}])
+    return texts[0] if texts else ""
 
 
 def read_text_file(file_path: Path) -> str:
@@ -96,23 +156,22 @@ def read_text_file(file_path: Path) -> str:
         return file_path.read_text(encoding="latin-1")
 
 
+# ── Main entry point ──────────────────────────────────────────────────────────
+
 def extract_text_from_document(conn, doc_id: int, local_path: str, ext: str, title: str = "") -> dict:
-    """Extract text from a document and store in document_text.
+    """Extract text from a document and store results in document_text.
 
-    Handles PDFs (PyMuPDF), TXT/CSV (direct read), and Office docs (via .preview.pdf).
-
-    Returns: {success: bool, page_count: int, char_count: int, error: str}
+    Returns: {success, page_count, char_count, error}
     """
     result = {"success": False, "page_count": 0, "char_count": 0, "error": ""}
 
-    # Log start
     now = datetime.now().isoformat()
     _execute(conn,
         "INSERT INTO processing_log (document_id, operation, status, started_at, created_at) VALUES (?, ?, ?, ?, ?)",
         (doc_id, "text_extract", "processing", now, now))
     _commit(conn)
 
-    file_path = Path(local_path)
+    file_path = Path(local_path.replace("\\", "/"))
     if not file_path.is_absolute():
         file_path = BASE_DIR / file_path
 
@@ -125,7 +184,6 @@ def extract_text_from_document(conn, doc_id: int, local_path: str, ext: str, tit
         _commit(conn)
         return result
 
-    # Size guard
     size_mb = file_path.stat().st_size / (1024 * 1024)
     if size_mb > OCR_MAX_FILE_SIZE_MB:
         result["error"] = f"File too large ({size_mb:.1f} MB > {OCR_MAX_FILE_SIZE_MB} MB limit)"
@@ -136,37 +194,42 @@ def extract_text_from_document(conn, doc_id: int, local_path: str, ext: str, tit
         _commit(conn)
         return result
 
-    ext_lower = ext.lower()
+    ext_lower = ext.lower().lstrip(".")
 
     try:
         pages = []
-        method = ""
 
         if ext_lower in TEXT_EXTRACTABLE_EXTENSIONS:
-            # PDF — extract per-page via PyMuPDF
-            method = "pymupdf"
             pages = extract_text_from_pdf(file_path)
 
         elif ext_lower in DIRECT_READ_EXTENSIONS:
-            # TXT/CSV — read entire file as one page
-            method = "direct_read"
-            text_content = read_text_file(file_path)
-            pages = [{"page_number": 0, "text": text_content}]
+            text = read_text_file(file_path)
+            pages = [{"page_number": 0, "text": text, "method": "direct_read"}]
 
         elif ext_lower in CONVERTIBLE_EXTENSIONS:
-            # Office docs — extract from .preview.pdf if it exists
-            preview_path = file_path.parent / (file_path.name + ".preview.pdf")
-            if preview_path.exists():
-                method = "pymupdf"
-                pages = extract_text_from_pdf(preview_path)
-            else:
-                result["error"] = f"No preview PDF found for Office document (run convert_previews.py first)"
+            preview = file_path.parent / (file_path.name + ".preview.pdf")
+            if not preview.exists():
+                result["error"] = "No preview PDF found (run convert_previews.py first)"
                 _execute(conn,
                     "UPDATE processing_log SET status=?, error_message=?, completed_at=? "
                     "WHERE document_id=? AND operation=? AND status=?",
                     ("failed", result["error"], datetime.now().isoformat(), doc_id, "text_extract", "processing"))
                 _commit(conn)
                 return result
+            pages = extract_text_from_pdf(preview)
+
+        elif ext_lower in IMAGE_OCR_EXTENSIONS:
+            if not is_surya_available():
+                result["error"] = "Surya not available (civic_media venv not found)"
+                _execute(conn,
+                    "UPDATE processing_log SET status=?, error_message=?, completed_at=? "
+                    "WHERE document_id=? AND operation=? AND status=?",
+                    ("failed", result["error"], datetime.now().isoformat(), doc_id, "text_extract", "processing"))
+                _commit(conn)
+                return result
+            text = extract_text_from_image(file_path)
+            pages = [{"page_number": 0, "text": text, "method": "surya"}]
+
         else:
             result["error"] = f"Unsupported extension: .{ext_lower}"
             _execute(conn,
@@ -176,23 +239,18 @@ def extract_text_from_document(conn, doc_id: int, local_path: str, ext: str, tit
             _commit(conn)
             return result
 
-        # Store extracted text (per page)
+        # Store per-page results
         total_chars = 0
-        pages_with_text = 0
         for page in pages:
             text = page["text"]
             total_chars += len(text)
-            if text:
-                pages_with_text += 1
             _execute(conn,
                 "INSERT OR REPLACE INTO document_text "
-                "(document_id, page_number, text_content, method) "
-                "VALUES (?, ?, ?, ?)",
-                (doc_id, page["page_number"], text, method))
+                "(document_id, page_number, text_content, method) VALUES (?, ?, ?, ?)",
+                (doc_id, page["page_number"], text, page["method"]))
 
         _commit(conn)
 
-        # Update processing_log
         _execute(conn,
             "UPDATE processing_log SET status=?, completed_at=? "
             "WHERE document_id=? AND operation=? AND status=?",
@@ -215,11 +273,17 @@ def extract_text_from_document(conn, doc_id: int, local_path: str, ext: str, tit
 
 
 def get_unprocessed_documents(conn, force: bool = False, limit: int = 0) -> list[dict]:
-    """Get documents that haven't had text extracted yet.
+    """Get documents that need text extraction.
 
-    Includes PDFs, TXT/CSV, and Office docs with .preview.pdf files.
+    Excludes:
+    - Docs with any surya result
+    - Docs with direct_read result
+    - Docs with pymupdf result that has meaningful content (>= SURYA_MIN_CHARS_PER_PAGE total)
+
+    Re-includes docs that only have empty pymupdf rows (scanned PDFs awaiting Surya).
     """
-    all_exts = TEXT_EXTRACTABLE_EXTENSIONS | DIRECT_READ_EXTENSIONS | CONVERTIBLE_EXTENSIONS
+    all_exts = (TEXT_EXTRACTABLE_EXTENSIONS | DIRECT_READ_EXTENSIONS
+                | CONVERTIBLE_EXTENSIONS | IMAGE_OCR_EXTENSIONS)
     ext_list = ",".join(f"'{e}'" for e in all_exts)
 
     if force:
@@ -241,8 +305,13 @@ def get_unprocessed_documents(conn, force: bool = False, limit: int = 0) -> list
               AND d.local_path IS NOT NULL
               AND LOWER(d.file_extension) IN ({ext_list})
               AND d.id NOT IN (
-                  SELECT DISTINCT document_id FROM document_text
-                  WHERE method IN ('pymupdf', 'direct_read')
+                  SELECT document_id FROM document_text
+                  WHERE method IN ('surya', 'direct_read')
+                  UNION
+                  SELECT document_id FROM document_text
+                  WHERE method = 'pymupdf'
+                  GROUP BY document_id
+                  HAVING SUM(LENGTH(text_content)) >= {SURYA_MIN_CHARS_PER_PAGE}
               )
             ORDER BY d.file_size_mb ASC
         """
