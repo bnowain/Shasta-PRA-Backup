@@ -583,6 +583,16 @@ class Scraper:
 
                 # Update mutable listing fields on existing records
                 # (captures status changes, new due dates, etc. without overwriting detail data)
+                new_state = item.get('request_state', '')
+
+                # Detect closed transition: stamp closed_date when state changes to Closed
+                if new_state.lower() == 'closed':
+                    self.conn.execute("""
+                        UPDATE requests SET closed_date = ?
+                        WHERE pretty_id = ? AND (request_state IS NULL OR LOWER(request_state) != 'closed')
+                              AND closed_date IS NULL
+                    """, (datetime.now().strftime('%m/%d/%Y'), pretty_id))
+
                 self.conn.execute("""
                     UPDATE requests SET
                         request_state = COALESCE(?, request_state),
@@ -594,7 +604,7 @@ class Scraper:
                         scraped_at = ?
                     WHERE pretty_id = ?
                 """, (
-                    item.get('request_state'),
+                    new_state,
                     item.get('due_date'),
                     item.get('department_names'),
                     item.get('poc_name'),
@@ -684,6 +694,15 @@ class Scraper:
 
             # Strip HTML from request_text for the plain-text column
             plain_text = BeautifulSoup(d.get('request_text', ''), 'lxml').get_text(separator='\n').strip()
+
+            # Detect closed transition: stamp closed_date when state changes to Closed
+            new_state = d.get('request_state', '')
+            if new_state.lower() == 'closed':
+                self.conn.execute("""
+                    UPDATE requests SET closed_date = ?
+                    WHERE pretty_id = ? AND (request_state IS NULL OR LOWER(request_state) != 'closed')
+                          AND closed_date IS NULL
+                """, (datetime.now().strftime('%m/%d/%Y'), pretty_id))
 
             self.conn.execute("""
                 UPDATE requests SET
